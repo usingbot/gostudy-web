@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist dist-server",
     "lint": "npm run typecheck",
-    "test": "tsx --test server/product-data.test.ts server/board-data.test.ts",
+    "test": "tsx --test server/product-data.test.ts server/board-data.test.ts server/reward-seen.test.ts src/api/productData.test.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {

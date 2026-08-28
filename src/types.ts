@@ -8,6 +8,7 @@ export interface InventoryItem {
   description: string | null;
   assetKey: string;
   metadata: Record<string, unknown>;
+  isNew: boolean;
 }
 
 export interface DashboardData {
@@ -16,6 +17,7 @@ export interface DashboardData {
   progressSeconds: number;
   secondsToNextMilestone: number;
   recentInventory: InventoryItem[];
+  newRewardCount: number;
 }
 
 export interface InventoryPage {
@@ -37,7 +39,7 @@ export interface BoardPosition {
   y: number;
 }
 
-export interface BoardItem extends InventoryItem, BoardPosition {}
+export interface BoardItem extends Omit<InventoryItem, 'isNew'>, BoardPosition {}
 
 export interface BoardData {
   items: BoardItem[];

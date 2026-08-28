@@ -37,6 +37,12 @@ import {
   PaginationValidationError,
   parseInventoryPagination,
 } from './product-data.js';
+import {
+  markRewardsSeen,
+  parseMarkRewardsSeenBody,
+  RewardSeenOwnershipError,
+  RewardSeenValidationError,
+} from './reward-seen.js';
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
 const DEFAULT_RETURN_TO = '/dashboard';
@@ -100,7 +106,7 @@ function readAuthenticatedUserId(request: Request, response: Response): string |
   return discordUserId;
 }
 
-function requireBoardAuthentication(
+function requireDataAuthentication(
   request: Request,
   response: Response,
   next: NextFunction,
@@ -123,7 +129,7 @@ function requireAppOrigin(appOrigin: string): RequestHandler {
   };
 }
 
-function getBoardUserId(response: Response): string {
+function getAuthenticatedUserId(response: Response): string {
   return response.locals.discordUserId as string;
 }
 
@@ -172,8 +178,13 @@ export function createApp(
   app.use('/api/board', (_request, response, next) => {
     response.set('Cache-Control', 'private, no-store');
     next();
-  }, requireBoardAuthentication);
+  }, requireDataAuthentication);
   app.use('/api/board', express.json({limit: '16kb', strict: true}));
+  app.use('/api/rewards', (_request, response, next) => {
+    response.set('Cache-Control', 'private, no-store');
+    next();
+  }, requireDataAuthentication);
+  app.use('/api/rewards', express.json({limit: '16kb', strict: true}));
 
   app.get('/auth/discord', asyncHandler(async (request, response) => {
     response.set('Cache-Control', 'no-store');
@@ -280,8 +291,30 @@ export function createApp(
     response.json(await getCatalog(pool));
   }));
 
+  app.post(
+    '/api/rewards/seen',
+    requireAppOrigin(config.appUrl.origin),
+    asyncHandler(async (request, response) => {
+      try {
+        const {rewardIds} = parseMarkRewardsSeenBody(request.body);
+        await markRewardsSeen(pool, getAuthenticatedUserId(response), rewardIds);
+        response.json({success: true});
+      } catch (error) {
+        if (error instanceof RewardSeenValidationError) {
+          response.status(400).json({error: 'Invalid reward IDs'});
+          return;
+        }
+        if (error instanceof RewardSeenOwnershipError) {
+          response.status(404).json({error: 'One or more rewards were not found'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
   app.get('/api/board', asyncHandler(async (_request, response) => {
-    response.json({items: await getBoardItems(pool, getBoardUserId(response))});
+    response.json({items: await getBoardItems(pool, getAuthenticatedUserId(response))});
   }));
 
   app.post(
@@ -290,7 +323,7 @@ export function createApp(
     asyncHandler(async (request, response) => {
       try {
         const input = parseBoardPlacementBody(request.body);
-        const item = await createBoardItem(pool, getBoardUserId(response), input);
+        const item = await createBoardItem(pool, getAuthenticatedUserId(response), input);
         response.status(201).json(item);
       } catch (error) {
         if (error instanceof BoardValidationError) {
@@ -330,7 +363,7 @@ export function createApp(
         const position = parseBoardPositionBody(request.body);
         response.json(await updateBoardItem(
           pool,
-          getBoardUserId(response),
+          getAuthenticatedUserId(response),
           hourRewardId,
           position,
         ));
@@ -354,7 +387,7 @@ export function createApp(
     asyncHandler(async (request, response) => {
       try {
         const hourRewardId = parseBoardItemId(request.params.hourRewardId);
-        await deleteBoardItem(pool, getBoardUserId(response), hourRewardId);
+        await deleteBoardItem(pool, getAuthenticatedUserId(response), hourRewardId);
         response.sendStatus(204);
       } catch (error) {
         if (error instanceof BoardValidationError) {

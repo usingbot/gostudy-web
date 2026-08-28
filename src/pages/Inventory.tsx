@@ -1,9 +1,14 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Backpack, Check, LoaderCircle, Plus} from 'lucide-react';
 import {motion} from 'motion/react';
 
 import {addBoardItem, fetchBoard} from '../api/board';
-import {ApiError, fetchInventoryPage} from '../api/productData';
+import {
+  ApiError,
+  fetchInventoryPage,
+  getNewRewardIds,
+  markRewardsSeen,
+} from '../api/productData';
 import {useAuth} from '../auth/AuthProvider';
 import {renderRewardAsset} from '../components/IconMap';
 import type {BoardItem, BoardPosition, InventoryItem} from '../types';
@@ -42,6 +47,8 @@ export default function Inventory() {
   const [placingItemId, setPlacingItemId] = useState<string | null>(null);
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
+  const [pendingSeenBatches, setPendingSeenBatches] = useState<string[][]>([]);
+  const startedSeenBatches = useRef(new WeakSet<string[]>());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,6 +62,10 @@ export default function Inventory() {
         setItems(page.items);
         setNextCursor(page.nextCursor);
         setBoardItems(board.items);
+        const newRewardIds = getNewRewardIds(page.items);
+        if (newRewardIds.length > 0) {
+          setPendingSeenBatches((batches) => [...batches, newRewardIds]);
+        }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
@@ -74,6 +85,26 @@ export default function Inventory() {
     return () => controller.abort();
   }, [refresh, requestVersion]);
 
+  const activeSeenBatch = pendingSeenBatches[0];
+  useEffect(() => {
+    if (!activeSeenBatch || startedSeenBatches.current.has(activeSeenBatch)) {
+      return;
+    }
+    startedSeenBatches.current.add(activeSeenBatch);
+    void markRewardsSeen(activeSeenBatch)
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) {
+          void refresh();
+        }
+        // Keep the rendered New badges and let a later navigation retry.
+      })
+      .finally(() => {
+        setPendingSeenBatches((batches) => (
+          batches[0] === activeSeenBatch ? batches.slice(1) : batches
+        ));
+      });
+  }, [activeSeenBatch, refresh]);
+
   const loadMore = async () => {
     if (!nextCursor || isLoadingMore) {
       return;
@@ -84,6 +115,10 @@ export default function Inventory() {
       const page = await fetchInventoryPage(PAGE_SIZE, nextCursor);
       setItems((currentItems) => [...currentItems, ...page.items]);
       setNextCursor(page.nextCursor);
+      const newRewardIds = getNewRewardIds(page.items);
+      if (newRewardIds.length > 0) {
+        setPendingSeenBatches((batches) => [...batches, newRewardIds]);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         await refresh();
@@ -181,6 +216,11 @@ export default function Inventory() {
                 className="group relative bg-[#18181b] border border-slate-800 rounded-2xl p-4 flex flex-col items-center text-center hover:border-indigo-500/50 hover:bg-slate-900/50 transition-all"
               >
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                {item.isNew && (
+                  <span className="absolute right-3 top-3 rounded-full border border-indigo-400/30 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-300">
+                    New
+                  </span>
+                )}
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 mt-2 transition-transform group-hover:scale-110 bg-slate-800 text-slate-300 group-hover:bg-indigo-500/10 group-hover:text-indigo-400">
                   {renderRewardAsset(item.assetKey, 'w-8 h-8')}
                 </div>

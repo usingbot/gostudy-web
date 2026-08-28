@@ -40,3 +40,22 @@ export function fetchInventoryPage(
 export function fetchCatalog(signal?: AbortSignal): Promise<CatalogItem[]> {
   return getJson('/api/catalog', signal);
 }
+
+export function getNewRewardIds(items: readonly {hourRewardId: string; isNew: boolean}[]): string[] {
+  return items.filter((item) => item.isNew).map((item) => item.hourRewardId);
+}
+
+export async function markRewardsSeen(rewardIds: readonly string[]): Promise<void> {
+  const response = await fetch('/api/rewards/seen', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({rewardIds}),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status);
+  }
+}

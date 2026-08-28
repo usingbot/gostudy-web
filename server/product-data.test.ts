@@ -53,7 +53,7 @@ function createTestConfig(): AppConfig {
   };
 }
 
-function makeInventoryRow(hourRewardId: string, itemKey = 'coffee') {
+function makeInventoryRow(hourRewardId: string, itemKey = 'coffee', isNew = false) {
   return {
     hour_rewardid: hourRewardId,
     milestone_hour: '42',
@@ -64,6 +64,7 @@ function makeInventoryRow(hourRewardId: string, itemKey = 'coffee') {
     description: 'Study fuel',
     asset_key: 'rewards/coffee',
     metadata: {rarity: 'common'},
+    is_new: isNew,
   };
 }
 
@@ -154,7 +155,32 @@ test('dashboard returns zero seconds and empty recent inventory when the account
     progressSeconds: 0,
     secondsToNextMilestone: 3600,
     recentInventory: [],
+    newRewardCount: 0,
   });
+});
+
+test('dashboard counts only rewards without a per-reward seen row', async () => {
+  const calls: QueryCall[] = [];
+  const pool = createPool((text) => {
+    if (text.includes('gostudy_reward_accounts')) {
+      return [{verified_seconds: '3601'}];
+    }
+    if (text.includes('count(*) AS new_reward_count')) {
+      return [{new_reward_count: '2'}];
+    }
+    if (text.includes('gostudy_user_inventory')) {
+      return [makeInventoryRow('10', 'coffee', true)];
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }, calls);
+
+  const dashboard = await getDashboardData(pool, '123456789');
+  assert.equal(dashboard.newRewardCount, 2);
+  assert.equal(dashboard.recentInventory[0].isNew, true);
+  const countCall = calls.find((call) => call.text.includes('new_reward_count'));
+  assert.deepEqual(countCall?.values, ['123456789']);
+  assert.match(countCall?.text ?? '', /NOT EXISTS/);
+  assert.match(countCall?.text ?? '', /seen\.hour_rewardid = reward\.rewardid/);
 });
 
 test('pagination validates bounds and PostgreSQL BIGINT cursors', () => {
@@ -193,8 +219,25 @@ test('inventory preserves duplicate instances and BIGINT IDs as strings', async 
     '9223372036854775805',
   ]);
   assert.deepEqual(page.items.map((item) => item.itemKey), ['coffee', 'coffee']);
+  assert.deepEqual(page.items.map((item) => item.isNew), [false, false]);
   assert.equal(calls[0].values[0], '123456789');
   assert.match(calls[0].text, /WHERE hr\.userid = \$1::bigint/);
+  assert.match(calls[0].text, /web_reward_seen_rewards/);
+  assert.match(calls[0].text, /NOT EXISTS/);
+});
+
+test('inventory represents arbitrary unseen holes independently on every keyset page', async () => {
+  const pool = createPool(() => [
+    makeInventoryRow('100', 'coffee', true),
+    makeInventoryRow('99', 'coffee', false),
+    makeInventoryRow('98', 'coffee', true),
+  ]);
+  const page = await getInventoryPage(pool, '123456789', {limit: 3, cursor: null});
+  assert.deepEqual(page.items.map(({hourRewardId, isNew}) => ({hourRewardId, isNew})), [
+    {hourRewardId: '100', isNew: true},
+    {hourRewardId: '99', isNew: false},
+    {hourRewardId: '98', isNew: true},
+  ]);
 });
 
 test('empty inventory returns an empty bounded page', async () => {

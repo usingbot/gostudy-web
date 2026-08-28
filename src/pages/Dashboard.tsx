@@ -113,7 +113,17 @@ export default function Dashboard() {
           <div className="md:col-span-12 md:row-span-3 bg-[#18181b] rounded-2xl p-6 border border-slate-800 flex flex-col">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">Recent Inventory</h3>
-              <Link to="/inventory" className="text-xs text-indigo-400 font-bold hover:underline">View All</Link>
+              <div className="flex items-center gap-3">
+                {data.newRewardCount > 0 && (
+                  <Link
+                    to="/inventory"
+                    className="rounded-full border border-indigo-400/30 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-semibold text-indigo-300 hover:border-indigo-400/60 hover:bg-indigo-500/20"
+                  >
+                    {data.newRewardCount} new {data.newRewardCount === 1 ? 'reward' : 'rewards'}
+                  </Link>
+                )}
+                <Link to="/inventory" className="text-xs text-indigo-400 font-bold hover:underline">View All</Link>
+              </div>
             </div>
             {data.recentInventory.length === 0 ? (
               <div className="flex-1 rounded-xl border border-dashed border-slate-800 flex items-center justify-center text-sm text-slate-500 text-center px-6">

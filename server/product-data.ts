@@ -19,6 +19,11 @@ interface InventoryRow extends QueryResultRow {
   description: string | null;
   asset_key: string;
   metadata: unknown;
+  is_new: boolean;
+}
+
+interface NewRewardCountRow extends QueryResultRow {
+  new_reward_count: string | number;
 }
 
 interface CatalogRow extends QueryResultRow {
@@ -40,6 +45,7 @@ export interface InventoryItem {
   description: string | null;
   assetKey: string;
   metadata: Record<string, unknown>;
+  isNew: boolean;
 }
 
 export interface InventoryPage {
@@ -58,6 +64,7 @@ export interface DashboardData {
   progressSeconds: number;
   secondsToNextMilestone: number;
   recentInventory: InventoryItem[];
+  newRewardCount: number;
 }
 
 export interface CatalogItem {
@@ -103,6 +110,9 @@ function parseMetadata(value: unknown): Record<string, unknown> {
 }
 
 function mapInventoryRow(row: InventoryRow): InventoryItem {
+  if (typeof row.is_new !== 'boolean') {
+    throw new Error('is_new was not a boolean');
+  }
   return {
     hourRewardId: parseBigintId(row.hour_rewardid, 'hour_rewardid'),
     milestoneHour: parseSafeNonNegativeInteger(row.milestone_hour, 'milestone_hour'),
@@ -113,6 +123,7 @@ function mapInventoryRow(row: InventoryRow): InventoryItem {
     description: row.description,
     assetKey: row.asset_key,
     metadata: parseMetadata(row.metadata),
+    isNew: row.is_new,
   };
 }
 
@@ -177,7 +188,13 @@ export async function getInventoryPage(
             catalog.display_name,
             catalog.description,
             catalog.asset_key,
-            catalog.metadata
+            catalog.metadata,
+            NOT EXISTS (
+              SELECT 1
+                FROM public.web_reward_seen_rewards AS seen
+               WHERE seen.userid = hr.userid
+                 AND seen.hour_rewardid = hr.rewardid
+            ) AS is_new
        FROM public.gostudy_user_inventory AS ui
        JOIN public.gostudy_hour_rewards AS hr
          ON hr.rewardid = ui.hour_rewardid
@@ -199,7 +216,7 @@ export async function getInventoryPage(
 }
 
 export async function getDashboardData(pool: Pool, discordUserId: string): Promise<DashboardData> {
-  const [accountResult, inventoryPage] = await Promise.all([
+  const [accountResult, inventoryPage, newRewardCountResult] = await Promise.all([
     pool.query<RewardAccountRow>(
       `SELECT verified_seconds
          FROM public.gostudy_reward_accounts
@@ -208,6 +225,18 @@ export async function getDashboardData(pool: Pool, discordUserId: string): Promi
       [discordUserId],
     ),
     getInventoryPage(pool, discordUserId, {limit: RECENT_INVENTORY_LIMIT, cursor: null}),
+    pool.query<NewRewardCountRow>(
+      `SELECT count(*) AS new_reward_count
+         FROM public.gostudy_hour_rewards AS reward
+        WHERE reward.userid = $1::bigint
+          AND NOT EXISTS (
+            SELECT 1
+              FROM public.web_reward_seen_rewards AS seen
+             WHERE seen.userid = reward.userid
+               AND seen.hour_rewardid = reward.rewardid
+          )`,
+      [discordUserId],
+    ),
   ]);
 
   const verifiedSeconds = accountResult.rows.length === 0
@@ -217,6 +246,12 @@ export async function getDashboardData(pool: Pool, discordUserId: string): Promi
     verifiedSeconds,
     ...calculateDashboardProgress(verifiedSeconds),
     recentInventory: inventoryPage.items,
+    newRewardCount: newRewardCountResult.rows.length === 0
+      ? 0
+      : parseSafeNonNegativeInteger(
+        newRewardCountResult.rows[0].new_reward_count,
+        'new_reward_count',
+      ),
   };
 }
 

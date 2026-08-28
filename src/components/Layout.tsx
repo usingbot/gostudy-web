@@ -1,8 +1,26 @@
-import { Link, useLocation, Outlet } from 'react-router-dom';
+import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import { Home, Backpack, Grid2X2, Settings, LogOut } from 'lucide-react';
+import {useState} from 'react';
+import {useAuth} from '../auth/AuthProvider';
 
 export default function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const {logout} = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutFailed, setLogoutFailed] = useState(false);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    setLogoutFailed(false);
+    try {
+      await logout();
+      navigate('/login', {replace: true});
+    } catch {
+      setLogoutFailed(true);
+      setIsLoggingOut(false);
+    }
+  };
 
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: Home },
@@ -50,10 +68,18 @@ export default function Layout() {
         </div>
 
         <div className="mt-auto pt-6 border-t border-slate-800">
-          <Link to="/" className="flex items-center justify-center md:justify-start gap-3 px-3 py-2 rounded-md text-slate-400 hover:bg-slate-800 transition-colors group text-sm font-medium">
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={isLoggingOut}
+            className="w-full flex items-center justify-center md:justify-start gap-3 px-3 py-2 rounded-md text-slate-400 hover:bg-slate-800 transition-colors group text-sm font-medium disabled:cursor-wait disabled:opacity-60"
+          >
             <LogOut className="w-5 h-5 shrink-0 opacity-70 group-hover:scale-110 transition-transform" />
-            <span className="hidden md:block">Log out</span>
-          </Link>
+            <span className="hidden md:block">{isLoggingOut ? 'Logging out…' : 'Log out'}</span>
+          </button>
+          {logoutFailed && (
+            <p className="hidden md:block mt-2 px-3 text-xs text-red-400">Logout failed. Please try again.</p>
+          )}
         </div>
       </aside>
 

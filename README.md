@@ -1,20 +1,20 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Go Study web
 
-# Run and deploy your AI Studio app
+The React frontend runs on Vite while a same-origin Express backend handles Discord OAuth and PostgreSQL-backed sessions.
 
-This contains everything you need to run your app locally.
+## Local setup
 
-View your app in AI Studio: https://ai.studio/apps/38503469-a6df-4606-8358-57ee88d95786
+Prerequisites: Node.js 20 or newer and PostgreSQL.
 
-## Run Locally
+1. Install dependencies with `npm install`.
+2. Copy `.env.example` to `.env` and replace every placeholder.
+3. Create the session table by applying `migrations/0001_create_web_sessions.sql` to the database.
+4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
+5. Start Express with `npm run dev:server`.
+6. In another terminal, start Vite with `npm run dev`.
 
-**Prerequisites:**  Node.js
+Vite listens on port 3000 and proxies `/api` and `/auth` to Express on port 8787. The OAuth request uses only Discord's `identify` scope.
 
+## Production
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Set `NODE_ENV=production`, use HTTPS values for `APP_URL` and `DISCORD_REDIRECT_URI`, set `TRUST_PROXY` for the actual reverse-proxy topology, and use certificate verification for PostgreSQL. `npm run build` builds both the Vite app and Express server; `npm start` serves the API, auth routes, and built frontend from one origin.

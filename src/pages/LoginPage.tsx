@@ -1,12 +1,9 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-
   const handleDiscordLogin = () => {
-    // MOCK LOGIN: Just redirect to dashboard immediately
-    navigate('/dashboard');
+    window.location.assign('/auth/discord');
   };
 
   return (

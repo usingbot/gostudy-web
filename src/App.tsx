@@ -10,6 +10,7 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Settings from './pages/Settings';
+import RequireAuth from './auth/RequireAuth';
 
 export default function App() {
   return (
@@ -18,15 +19,16 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         
-        {/* Authenticated Routes wrapped in Sidebar Layout */}
-        <Route element={<Layout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/board" element={<div className="text-slate-400 p-8 text-center mt-20">Coming Soon</div>} />
-          <Route path="/settings" element={<Settings />} />
+        <Route element={<RequireAuth />}>
+          {/* Authenticated Routes wrapped in Sidebar Layout */}
+          <Route element={<Layout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/inventory" element={<Inventory />} />
+            <Route path="/board" element={<div className="text-slate-400 p-8 text-center mt-20">Coming Soon</div>} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
         </Route>
       </Routes>
     </Router>
   );
 }
-

@@ -5,26 +5,34 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "vite build && tsc -p tsconfig.server.json",
+    "start": "node dist-server/index.js",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "clean": "rm -rf dist dist-server",
+    "lint": "npm run typecheck",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "connect-pg-simple": "^10.0.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "pg": "^8.23.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "react-router-dom": "^7.18.2",
-    "vite": "^6.2.3"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@types/connect-pg-simple": "^7.0.3",
     "@types/node": "^22.14.0",
+    "@types/express-session": "^1.19.0",
+    "@types/pg": "^8.23.1",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",

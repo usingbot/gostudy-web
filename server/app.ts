@@ -15,12 +15,23 @@ import type {Pool} from 'pg';
 
 import type {AppConfig} from './config.js';
 import {createDiscordAuthorizationUrl, exchangeCodeForDiscordUser} from './discord.js';
+import {
+  getCatalog,
+  getDashboardData,
+  getInventoryPage,
+  PaginationValidationError,
+  parseInventoryPagination,
+} from './product-data.js';
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
 const DEFAULT_RETURN_TO = '/dashboard';
 const ALLOWED_RETURN_TO = new Set(['/dashboard', '/inventory', '/settings'] as const);
 
 type AllowedReturnTo = '/dashboard' | '/inventory' | '/settings';
+
+export interface CreateAppOptions {
+  sessionStore?: session.Store;
+}
 
 function asyncHandler(
   handler: (request: Request, response: Response, next: NextFunction) => Promise<void>,
@@ -65,7 +76,20 @@ function statesMatch(received: string, expected: string): boolean {
     && timingSafeEqual(receivedBuffer, expectedBuffer);
 }
 
-export function createApp(config: AppConfig, pool: Pool): express.Express {
+function readAuthenticatedUserId(request: Request, response: Response): string | null {
+  const discordUserId = request.session.discordUserId;
+  if (typeof discordUserId !== 'string' || !/^\d+$/.test(discordUserId)) {
+    response.sendStatus(401);
+    return null;
+  }
+  return discordUserId;
+}
+
+export function createApp(
+  config: AppConfig,
+  pool: Pool,
+  options: CreateAppOptions = {},
+): express.Express {
   const app = express();
   const PgSessionStore = connectPgSimple(session);
   const secureCookie = config.nodeEnv === 'production';
@@ -80,16 +104,17 @@ export function createApp(config: AppConfig, pool: Pool): express.Express {
       },
     },
   }));
+  const sessionStore = options.sessionStore ?? new PgSessionStore({
+    pool,
+    schemaName: 'public',
+    tableName: 'web_sessions',
+    createTableIfMissing: false,
+    ttl: config.sessionTtlSeconds,
+    errorLog: () => console.error('Session store operation failed'),
+  });
   const sessionMiddleware = session({
     name: SESSION_COOKIE_NAME,
-    store: new PgSessionStore({
-      pool,
-      schemaName: 'public',
-      tableName: 'web_sessions',
-      createTableIfMissing: false,
-      ttl: config.sessionTtlSeconds,
-      errorLog: () => console.error('Session store operation failed'),
-    }),
+    store: sessionStore,
     secret: config.sessionSecret,
     resave: false,
     saveUninitialized: false,
@@ -171,6 +196,42 @@ export function createApp(config: AppConfig, pool: Pool): express.Express {
       avatarHash: request.session.avatarHash ?? null,
     });
   });
+
+  app.get('/api/dashboard', asyncHandler(async (request, response) => {
+    response.set('Cache-Control', 'private, no-store');
+    const discordUserId = readAuthenticatedUserId(request, response);
+    if (!discordUserId) {
+      return;
+    }
+    response.json(await getDashboardData(pool, discordUserId));
+  }));
+
+  app.get('/api/inventory', asyncHandler(async (request, response) => {
+    response.set('Cache-Control', 'private, no-store');
+    const discordUserId = readAuthenticatedUserId(request, response);
+    if (!discordUserId) {
+      return;
+    }
+
+    try {
+      const pagination = parseInventoryPagination(request.query);
+      response.json(await getInventoryPage(pool, discordUserId, pagination));
+    } catch (error) {
+      if (error instanceof PaginationValidationError) {
+        response.status(400).json({error: 'Invalid inventory pagination'});
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.get('/api/catalog', asyncHandler(async (request, response) => {
+    response.set('Cache-Control', 'private, no-store');
+    if (!readAuthenticatedUserId(request, response)) {
+      return;
+    }
+    response.json(await getCatalog(pool));
+  }));
 
   app.post('/api/logout', asyncHandler(async (request, response) => {
     response.set('Cache-Control', 'no-store');

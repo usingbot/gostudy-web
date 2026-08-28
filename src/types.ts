@@ -1,17 +1,33 @@
-export interface User {
-  id: string;
-  username: string;
-  avatarUrl: string;
-  totalHours: number;
-  currentSessionMinutes: number;
-  minutesToNextReward: number;
+export interface InventoryItem {
+  hourRewardId: string;
+  milestoneHour: number;
+  earnedAt: string;
+  grantedAt: string;
+  itemKey: string;
+  displayName: string;
+  description: string | null;
+  assetKey: string;
+  metadata: Record<string, unknown>;
 }
 
-export interface Reward {
-  id: string;
-  name: string;
-  iconName: string;
-  description: string;
-  earnedAt: string;
-  quantity: number;
+export interface DashboardData {
+  verifiedSeconds: number;
+  completedHours: number;
+  progressSeconds: number;
+  secondsToNextMilestone: number;
+  recentInventory: InventoryItem[];
+}
+
+export interface InventoryPage {
+  items: InventoryItem[];
+  nextCursor: string | null;
+}
+
+export interface CatalogItem {
+  itemKey: string;
+  displayName: string;
+  description: string | null;
+  assetKey: string;
+  metadata: Record<string, unknown>;
+  active: boolean;
 }

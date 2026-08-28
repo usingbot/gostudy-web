@@ -15,6 +15,14 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 Vite listens on port 3000 and proxies `/api` and `/auth` to Express on port 8787. The OAuth request uses only Discord's `identify` scope.
 
+## Authenticated data API
+
+- `GET /api/dashboard` returns verified-time progress and the four most recent inventory instances.
+- `GET /api/inventory?limit=20&cursor=<hourRewardId>` returns a bounded, descending keyset page as `{items, nextCursor}`.
+- `GET /api/catalog` returns the reward catalog ordered by its selection order.
+
+All three endpoints derive the Discord user ID from the server session. Inventory IDs are serialized as decimal strings.
+
 ## Production
 
 Set `NODE_ENV=production`, use HTTPS values for `APP_URL` and `DISCORD_REDIRECT_URI`, set `TRUST_PROXY` for the actual reverse-proxy topology, and use certificate verification for PostgreSQL. `npm run build` builds both the Vite app and Express server; `npm start` serves the API, auth routes, and built frontend from one origin.

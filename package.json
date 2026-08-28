@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist dist-server",
     "lint": "npm run typecheck",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
+    "test": "tsx --test server/product-data.test.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

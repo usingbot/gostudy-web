@@ -1,14 +1,22 @@
-import { Coffee, BookOpen, Moon, Star, ShieldCheck, HelpCircle } from 'lucide-react';
+import {
+  BookOpen,
+  Coffee,
+  HelpCircle,
+  Moon,
+  ShieldCheck,
+  Star,
+  type LucideIcon,
+} from 'lucide-react';
 
-export const renderIcon = (name: string, className?: string) => {
-  const map: Record<string, any> = {
-    Coffee,
-    BookOpen,
-    Moon,
-    Star,
-    ShieldCheck
-  };
-  
-  const Icon = map[name] || HelpCircle;
-  return <Icon className={className} />;
+const rewardAssetIcons: Readonly<Record<string, LucideIcon>> = {
+  'rewards/coffee': Coffee,
+  'rewards/books': BookOpen,
+  'rewards/moon': Moon,
+  'rewards/study-star': Star,
+  'rewards/verified-hour-token': ShieldCheck,
 };
+
+export function renderRewardAsset(assetKey: string, className?: string) {
+  const Icon = rewardAssetIcons[assetKey] ?? HelpCircle;
+  return <Icon className={className} />;
+}

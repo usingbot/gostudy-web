@@ -1,0 +1,84 @@
+import { motion } from 'motion/react';
+import { mockUser, mockRewards } from '../data';
+import { renderIcon } from '../components/IconMap';
+import { Star } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
+export default function Dashboard() {
+  const recentRewards = mockRewards.slice(0, 5);
+  const progressPercent = (mockUser.currentSessionMinutes / mockUser.minutesToNextReward) * 100;
+
+  return (
+    <div className="flex-1 flex flex-col w-full h-full min-h-0">
+      <header className='flex flex-col md:flex-row justify-between md:items-center mb-8 gap-4'> 
+        <div> 
+          <h2 className='text-2xl font-bold'>Study Dashboard</h2> 
+          <p className='text-slate-500 text-sm'>Welcome back, {mockUser.username}! Keep up the great work today.</p> 
+        </div> 
+        <div className='flex gap-4'> 
+          <button className='px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold rounded-lg shadow-lg shadow-indigo-500/20 transition-all'>Open Discord</button> 
+        </div> 
+      </header>
+
+      <div className='grid grid-cols-1 md:grid-cols-12 md:grid-rows-6 gap-4 flex-1 h-full min-h-[500px]'> 
+        {/* Next Reward Progress */}
+        <div className='md:col-span-8 md:row-span-3 bg-[#18181b] rounded-2xl p-6 border border-slate-800 flex flex-col justify-between relative overflow-hidden'> 
+          <div className='relative z-10'> 
+            <h3 className='text-slate-400 text-xs font-bold uppercase tracking-widest mb-1'>Current Goal</h3> 
+            <p className='text-3xl font-light text-white mb-6'>Next reward in <span className='font-bold text-indigo-400'>{mockUser.minutesToNextReward - mockUser.currentSessionMinutes}m</span></p> 
+            <div className='space-y-3'> 
+              <div className='flex justify-between text-sm mb-1'> 
+                <span className='text-slate-400 font-medium'>Progress toward next 60m milestone</span> 
+                <span className='font-bold'>{mockUser.currentSessionMinutes}m / {mockUser.minutesToNextReward}m</span> 
+              </div> 
+              <div className='h-3 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800'> 
+                <motion.div 
+                   initial={{ width: 0 }}
+                   animate={{ width: `${progressPercent}%` }}
+                   transition={{ duration: 1, ease: "easeOut" }}
+                   className='h-full bg-gradient-to-r from-indigo-600 to-indigo-400 rounded-full'
+                 />
+              </div> 
+            </div> 
+          </div> 
+          <div className='absolute -right-12 -bottom-12 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl' /> 
+        </div> 
+
+        {/* Total Verified Hours */}
+        <div className='md:col-span-4 md:row-span-3 bg-[#18181b] rounded-2xl p-6 border border-slate-800 flex flex-col items-center justify-center text-center'> 
+          <div className='w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500 mb-4 border border-amber-500/30'>
+             <Star className="w-8 h-8" fill="currentColor" />
+          </div> 
+          <h3 className='text-slate-400 text-xs font-bold uppercase tracking-widest mb-1'>Total Verified</h3> 
+          <p className='text-5xl font-black text-white'>{mockUser.totalHours}</p> 
+          <p className='text-slate-500 text-xs mt-2'>Verified Study Hours</p> 
+        </div> 
+
+        {/* Item Inventory */}
+        <div className='md:col-span-12 md:row-span-3 bg-[#18181b] rounded-2xl p-6 border border-slate-800 flex flex-col'> 
+          <div className='flex justify-between items-center mb-6'> 
+            <h3 className='text-sm font-bold uppercase tracking-widest text-slate-400'>Item Inventory</h3> 
+            <Link to="/inventory" className='text-xs text-indigo-400 font-bold hover:underline'>View All</Link> 
+          </div> 
+          <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 flex-1'> 
+            {recentRewards.map((reward, i) => (
+              <motion.div 
+                whileHover={{ scale: 1.02 }}
+                key={reward.id} 
+                className={`rounded-xl p-4 border flex flex-col items-center justify-center group cursor-pointer transition-all ${
+                  i === 0 ? 'bg-indigo-900/20 border-indigo-500/30 hover:border-indigo-500/50' : 'bg-slate-900/50 border-slate-800 hover:border-indigo-500/50'
+                }`}
+              > 
+                <div className={`mb-2 transition-all ${i === 0 ? 'text-indigo-400' : 'text-slate-400 grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100'}`}>
+                   {renderIcon(reward.iconName, 'w-8 h-8')}
+                </div> 
+                <p className={`text-[10px] font-bold uppercase text-center line-clamp-1 ${i === 0 ? 'text-indigo-400' : 'text-slate-500'}`}>{reward.name}</p> 
+                <span className={`text-[10px] mt-2 px-2 py-0.5 rounded ${i === 0 ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-300'}`}>x{reward.quantity}</span> 
+              </motion.div>
+            ))}
+          </div> 
+        </div> 
+      </div> 
+    </div>
+  );
+}

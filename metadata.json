@@ -1,0 +1,8 @@
+{
+  "name": "Go Study",
+  "description": "A study-accountability platform connected to Discord.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

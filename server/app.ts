@@ -14,6 +14,21 @@ import helmet from 'helmet';
 import type {Pool} from 'pg';
 
 import type {AppConfig} from './config.js';
+import {
+  BoardCapacityError,
+  BoardItemAlreadyPlacedError,
+  BoardItemNotFoundError,
+  BoardItemNotOwnedError,
+  BoardValidationError,
+  createBoardItem,
+  deleteBoardItem,
+  getBoardItems,
+  MAX_BOARD_ITEMS,
+  parseBoardItemId,
+  parseBoardPlacementBody,
+  parseBoardPositionBody,
+  updateBoardItem,
+} from './board-data.js';
 import {createDiscordAuthorizationUrl, exchangeCodeForDiscordUser} from './discord.js';
 import {
   getCatalog,
@@ -85,6 +100,33 @@ function readAuthenticatedUserId(request: Request, response: Response): string |
   return discordUserId;
 }
 
+function requireBoardAuthentication(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): void {
+  const discordUserId = readAuthenticatedUserId(request, response);
+  if (!discordUserId) {
+    return;
+  }
+  response.locals.discordUserId = discordUserId;
+  next();
+}
+
+function requireAppOrigin(appOrigin: string): RequestHandler {
+  return (request, response, next) => {
+    if (request.get('Origin') !== appOrigin) {
+      response.status(403).json({error: 'Invalid request origin'});
+      return;
+    }
+    next();
+  };
+}
+
+function getBoardUserId(response: Response): string {
+  return response.locals.discordUserId as string;
+}
+
 export function createApp(
   config: AppConfig,
   pool: Pool,
@@ -127,6 +169,11 @@ export function createApp(
     },
   });
   app.use(['/api', '/auth'], sessionMiddleware);
+  app.use('/api/board', (_request, response, next) => {
+    response.set('Cache-Control', 'private, no-store');
+    next();
+  }, requireBoardAuthentication);
+  app.use('/api/board', express.json({limit: '16kb', strict: true}));
 
   app.get('/auth/discord', asyncHandler(async (request, response) => {
     response.set('Cache-Control', 'no-store');
@@ -233,6 +280,92 @@ export function createApp(
     response.json(await getCatalog(pool));
   }));
 
+  app.get('/api/board', asyncHandler(async (_request, response) => {
+    response.json({items: await getBoardItems(pool, getBoardUserId(response))});
+  }));
+
+  app.post(
+    '/api/board/items',
+    requireAppOrigin(config.appUrl.origin),
+    asyncHandler(async (request, response) => {
+      try {
+        const input = parseBoardPlacementBody(request.body);
+        const item = await createBoardItem(pool, getBoardUserId(response), input);
+        response.status(201).json(item);
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid board item'});
+          return;
+        }
+        if (error instanceof BoardItemNotOwnedError) {
+          response.status(404).json({error: 'Inventory item not found'});
+          return;
+        }
+        if (error instanceof BoardItemAlreadyPlacedError) {
+          response.status(409).json({
+            error: 'Item is already on the Study Board',
+            code: 'BOARD_ITEM_ALREADY_PLACED',
+          });
+          return;
+        }
+        if (error instanceof BoardCapacityError) {
+          response.status(409).json({
+            error: 'Study Board capacity reached',
+            code: 'BOARD_CAPACITY_REACHED',
+            limit: MAX_BOARD_ITEMS,
+          });
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.patch(
+    '/api/board/items/:hourRewardId',
+    requireAppOrigin(config.appUrl.origin),
+    asyncHandler(async (request, response) => {
+      try {
+        const hourRewardId = parseBoardItemId(request.params.hourRewardId);
+        const position = parseBoardPositionBody(request.body);
+        response.json(await updateBoardItem(
+          pool,
+          getBoardUserId(response),
+          hourRewardId,
+          position,
+        ));
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid board position'});
+          return;
+        }
+        if (error instanceof BoardItemNotFoundError) {
+          response.status(404).json({error: 'Board item not found'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.delete(
+    '/api/board/items/:hourRewardId',
+    requireAppOrigin(config.appUrl.origin),
+    asyncHandler(async (request, response) => {
+      try {
+        const hourRewardId = parseBoardItemId(request.params.hourRewardId);
+        await deleteBoardItem(pool, getBoardUserId(response), hourRewardId);
+        response.sendStatus(204);
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid board item'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
   app.post('/api/logout', asyncHandler(async (request, response) => {
     response.set('Cache-Control', 'no-store');
     await destroySession(request);
@@ -261,6 +394,15 @@ export function createApp(
   const errorHandler: ErrorRequestHandler = (error, request, response, next) => {
     if (response.headersSent) {
       next(error);
+      return;
+    }
+    const bodyError = error as {status?: unknown; type?: unknown};
+    if (bodyError.status === 413) {
+      response.status(413).json({error: 'Request body too large'});
+      return;
+    }
+    if (bodyError.status === 400 && bodyError.type === 'entity.parse.failed') {
+      response.status(400).json({error: 'Invalid JSON body'});
       return;
     }
     console.error(`Request failed: ${request.method} ${request.path}`);

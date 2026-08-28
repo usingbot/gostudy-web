@@ -1,7 +1,10 @@
 import type {CatalogItem, DashboardData, InventoryPage} from '../types';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number) {
+  constructor(
+    public readonly status: number,
+    public readonly code?: string,
+  ) {
     super(`API request failed with status ${status}`);
   }
 }

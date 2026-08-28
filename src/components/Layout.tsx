@@ -25,7 +25,7 @@ export default function Layout() {
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: Home },
     { name: 'Inventory', path: '/inventory', icon: Backpack },
-    { name: 'Study Board', path: '/board', icon: Grid2X2, disabled: true },
+    { name: 'Study Board', path: '/board', icon: Grid2X2 },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
@@ -43,13 +43,7 @@ export default function Layout() {
           <nav className="space-y-1">
             {navItems.map((item) => {
               const isActive = location.pathname === item.path;
-              return item.disabled ? (
-                <div key={item.name} className="flex items-center justify-center md:justify-start gap-3 px-3 py-2 rounded-md text-slate-500 cursor-not-allowed group text-sm font-medium">
-                  <item.icon className="w-5 h-5 shrink-0 opacity-50" />
-                  <span className="hidden md:block font-medium">{item.name}</span>
-                  <span className="hidden md:block ml-auto text-[10px] bg-slate-800 px-1.5 py-0.5 rounded uppercase tracking-wider">Soon</span>
-                </div>
-              ) : (
+              return (
                 <Link
                   key={item.name}
                   to={item.path}

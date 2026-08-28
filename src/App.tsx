@@ -9,6 +9,7 @@ import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
+import StudyBoard from './pages/StudyBoard';
 import Settings from './pages/Settings';
 import RequireAuth from './auth/RequireAuth';
 
@@ -24,7 +25,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/inventory" element={<Inventory />} />
-            <Route path="/board" element={<div className="text-slate-400 p-8 text-center mt-20">Coming Soon</div>} />
+            <Route path="/board" element={<StudyBoard />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Route>

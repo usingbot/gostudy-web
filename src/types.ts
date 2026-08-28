@@ -31,3 +31,14 @@ export interface CatalogItem {
   metadata: Record<string, unknown>;
   active: boolean;
 }
+
+export interface BoardPosition {
+  x: number;
+  y: number;
+}
+
+export interface BoardItem extends InventoryItem, BoardPosition {}
+
+export interface BoardData {
+  items: BoardItem[];
+}

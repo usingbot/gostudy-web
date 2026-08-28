@@ -1,16 +1,34 @@
 import {useEffect, useState} from 'react';
-import {Backpack} from 'lucide-react';
+import {Backpack, Check, LoaderCircle, Plus} from 'lucide-react';
 import {motion} from 'motion/react';
 
+import {addBoardItem, fetchBoard} from '../api/board';
 import {ApiError, fetchInventoryPage} from '../api/productData';
 import {useAuth} from '../auth/AuthProvider';
 import {renderRewardAsset} from '../components/IconMap';
-import type {InventoryItem} from '../types';
+import type {BoardItem, BoardPosition, InventoryItem} from '../types';
 
 const PAGE_SIZE = 20;
 
 function formatEarnedAt(value: string): string {
   return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(value));
+}
+
+function findFirstFreePosition(boardItems: BoardItem[]): BoardPosition | null {
+  if (boardItems.length >= 100) {
+    return null;
+  }
+  const occupiedCells = new Set(boardItems.map((item) => (
+    `${Math.round(item.x * 9)}:${Math.round(item.y * 9)}`
+  )));
+  for (let index = 0; index < 100; index += 1) {
+    const column = index % 10;
+    const row = Math.floor(index / 10);
+    if (!occupiedCells.has(`${column}:${row}`)) {
+      return {x: column / 9, y: row / 9};
+    }
+  }
+  return null;
 }
 
 export default function Inventory() {
@@ -20,16 +38,23 @@ export default function Inventory() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
+  const [placingItemId, setPlacingItemId] = useState<string | null>(null);
+  const [placementError, setPlacementError] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setIsLoading(true);
     setLoadFailed(false);
-    fetchInventoryPage(PAGE_SIZE, undefined, controller.signal)
-      .then((page) => {
+    Promise.all([
+      fetchInventoryPage(PAGE_SIZE, undefined, controller.signal),
+      fetchBoard(controller.signal),
+    ])
+      .then(([page, board]) => {
         setItems(page.items);
         setNextCursor(page.nextCursor);
+        setBoardItems(board.items);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
@@ -69,6 +94,42 @@ export default function Inventory() {
       setIsLoadingMore(false);
     }
   };
+
+  const handleAddToBoard = async (item: InventoryItem) => {
+    if (placingItemId) {
+      return;
+    }
+    const position = findFirstFreePosition(boardItems);
+    if (!position) {
+      setPlacementError('Your Study Board already has the maximum of 100 items.');
+      return;
+    }
+    setPlacementError(null);
+    setPlacingItemId(item.hourRewardId);
+    try {
+      const placedItem = await addBoardItem(item.hourRewardId, position);
+      setBoardItems((currentItems) => [...currentItems, placedItem]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await refresh();
+      } else if (error instanceof ApiError && error.code === 'BOARD_CAPACITY_REACHED') {
+        setPlacementError('Your Study Board already has the maximum of 100 items.');
+      } else if (error instanceof ApiError && error.code === 'BOARD_ITEM_ALREADY_PLACED') {
+        try {
+          const board = await fetchBoard();
+          setBoardItems(board.items);
+        } catch {
+          setPlacementError('This item is already on your board. Refresh to update its status.');
+        }
+      } else {
+        setPlacementError(`Could not add ${item.displayName} to your board. Please try again.`);
+      }
+    } finally {
+      setPlacingItemId(null);
+    }
+  };
+
+  const placedItemIds = new Set(boardItems.map((item) => item.hourRewardId));
 
   return (
     <div className="space-y-8 pb-10">
@@ -128,12 +189,33 @@ export default function Inventory() {
                   Hour {item.milestoneHour}
                 </span>
                 <span className="mt-2 text-[10px] text-slate-600">Earned {formatEarnedAt(item.earnedAt)}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleAddToBoard(item)}
+                  disabled={placedItemIds.has(item.hourRewardId) || placingItemId !== null}
+                  className={`mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-default ${
+                    placedItemIds.has(item.hourRewardId)
+                      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                      : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:border-indigo-400/60 hover:bg-indigo-500/20 disabled:opacity-50'
+                  }`}
+                >
+                  {placedItemIds.has(item.hourRewardId) ? (
+                    <><Check className="h-3.5 w-3.5" /> On Board</>
+                  ) : placingItemId === item.hourRewardId ? (
+                    <><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Adding…</>
+                  ) : (
+                    <><Plus className="h-3.5 w-3.5" /> Add to Board</>
+                  )}
+                </button>
               </motion.div>
             ))}
           </motion.div>
 
           {loadFailed && (
             <p className="text-center text-sm text-red-400">The next page could not be loaded. Please try again.</p>
+          )}
+          {placementError && (
+            <p role="alert" className="text-center text-sm text-red-400">{placementError}</p>
           )}
           {nextCursor && (
             <div className="flex justify-center">

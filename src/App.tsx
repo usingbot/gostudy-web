@@ -11,7 +11,10 @@ import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import StudyBoard from './pages/StudyBoard';
 import Settings from './pages/Settings';
+import Admin from './pages/Admin';
+import AdminUserDetail from './pages/AdminUserDetail';
 import RequireAuth from './auth/RequireAuth';
+import RequireAdmin from './auth/RequireAdmin';
 
 export default function App() {
   return (
@@ -27,6 +30,10 @@ export default function App() {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/board" element={<StudyBoard />} />
             <Route path="/settings" element={<Settings />} />
+            <Route element={<RequireAdmin />}>
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/users/:userid" element={<AdminUserDetail />} />
+            </Route>
           </Route>
         </Route>
       </Routes>

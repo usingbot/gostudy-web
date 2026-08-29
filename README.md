@@ -8,7 +8,7 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
@@ -38,6 +38,48 @@ The `gostudy_web` role receives only `SELECT` and `INSERT` on `public.web_reward
 - `DELETE /api/board/items/:hourRewardId` idempotently removes the current user's placement.
 
 Board writes require the request `Origin` to match `APP_URL`. Ownership is derived from the authenticated session and verified against the product inventory tables. A board can contain at most 100 item instances. The web database role needs `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges on `public.web_study_boards` and `public.web_study_board_items`; product-table access remains read-only.
+
+## Admin Panel and web roles
+
+An authenticated user without a row in `public.web_user_roles` is an ordinary `user`. Stored roles are `owner`, `admin`, and `tester`; only owner and admin can access `/admin` or protected admin APIs. The server reads the effective role from PostgreSQL on every protected request and always derives the actor Discord ID from the server session.
+
+The Admin Panel supports exact canonical Discord-user-ID lookup only. A displayed username, global name, or avatar is a best-known projection from that user's latest unexpired website session, not proof of current Discord membership. Session identifiers, session JSON, OAuth state, and secrets are never returned.
+
+Admin mutations require an authenticated owner/admin session, an exact same-origin `Origin`, JSON media type, a strict body no larger than 16 KiB, and canonical input. They are limited to 30 attempts per authenticated actor per 10 minutes in this one-process private-alpha deployment. Horizontal deployment requires a shared rate-limit store.
+
+Chalk adjustments call only the four narrow v19 admin/read functions. The server namespaces a client UUIDv4 as `admin:<actor_userid>:<requestId>`, and the UI retains that UUID for retries whose result is unknown. The runtime role has no generic Chalk mutation privilege and no direct Chalk-table or role-table mutation privilege.
+
+### Deploying migration 0004
+
+Create the trusted owner role outside tracked application migrations if it does not already exist:
+
+```sql
+CREATE ROLE gostudy_web_owner NOLOGIN;
+```
+
+After applying `migrations/0004_create_admin_roles.sql` with a deployment role, transfer every web security object to that NOLOGIN role:
+
+```sql
+ALTER TABLE public.web_user_roles OWNER TO gostudy_web_owner;
+ALTER TABLE public.web_role_audit OWNER TO gostudy_web_owner;
+ALTER SEQUENCE public.web_role_audit_auditid_seq OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_reject_role_audit_mutation()
+  OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_bootstrap_owner(bigint)
+  OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_change_user_role(bigint, bigint, text, text, text)
+  OWNER TO gostudy_web_owner;
+```
+
+Do not grant `gostudy_web` membership in `gostudy_web_owner`. From a controlled deployment session authorized as `gostudy_web_owner`, bootstrap the one initial owner exactly once, substituting the intended canonical Discord user ID:
+
+```sql
+SELECT public.web_bootstrap_owner(:OWNER_DISCORD_USERID::bigint);
+```
+
+The bootstrap function is not executable by `gostudy_web`; a second bootstrap fails. Normal role operations cannot create, change, delete, or transfer the owner role.
+
+Disposable PostgreSQL coverage lives in `tests/integration/chapter2b_v19_setup.sql` and `tests/integration/chapter2b_admin.sql`. Load the current StudyLion schema v19 into a throwaway database, run the setup file, apply migration 0004, and then run the admin integration file. Never point this sequence at `lion_data`.
 
 ## Production
 

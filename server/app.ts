@@ -15,6 +15,29 @@ import type {Pool} from 'pg';
 
 import type {AppConfig} from './config.js';
 import {
+  getRoleCapabilities,
+  getUserRole,
+  requireAdmin,
+  type UserRole,
+} from './admin-auth.js';
+import {
+  applyChalkAdjustment,
+  changeUserRole,
+  databaseErrorCode,
+  getAdminUserDetail,
+  getAdminUserSummary,
+  getRoleAudit,
+} from './admin-data.js';
+import {createActorRateLimiter} from './admin-rate-limit.js';
+import {
+  AdminValidationError,
+  parseAdminPagination,
+  parseChalkAdjustmentBody,
+  parseDiscordUserId,
+  parseRoleChangeBody,
+  parseUserSearchQuery,
+} from './admin-validation.js';
+import {
   BoardCapacityError,
   BoardItemAlreadyPlacedError,
   BoardItemNotFoundError,
@@ -46,9 +69,15 @@ import {
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
 const DEFAULT_RETURN_TO = '/dashboard';
-const ALLOWED_RETURN_TO = new Set(['/dashboard', '/inventory', '/settings'] as const);
+const ALLOWED_RETURN_TO = new Set([
+  '/dashboard',
+  '/inventory',
+  '/board',
+  '/settings',
+  '/admin',
+] as const);
 
-type AllowedReturnTo = '/dashboard' | '/inventory' | '/settings';
+type AllowedReturnTo = '/dashboard' | '/inventory' | '/board' | '/settings' | '/admin';
 
 export interface CreateAppOptions {
   sessionStore?: session.Store;
@@ -129,6 +158,18 @@ function requireAppOrigin(appOrigin: string): RequestHandler {
   };
 }
 
+function requireJsonContentType(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): void {
+  if (!request.is('application/json')) {
+    response.status(415).json({error: 'JSON_CONTENT_TYPE_REQUIRED'});
+    return;
+  }
+  next();
+}
+
 function getAuthenticatedUserId(response: Response): string {
   return response.locals.discordUserId as string;
 }
@@ -185,6 +226,149 @@ export function createApp(
     next();
   }, requireDataAuthentication);
   app.use('/api/rewards', express.json({limit: '16kb', strict: true}));
+
+  const adminJsonParser = express.json({limit: '16kb', strict: true});
+  const adminMutationRateLimiter = createActorRateLimiter();
+  app.use('/api/admin', (_request, response, next) => {
+    response.set('Cache-Control', 'private, no-store');
+    next();
+  }, requireDataAuthentication);
+
+  app.get('/api/admin/me', asyncHandler(async (_request, response) => {
+    const role = await getUserRole(pool, getAuthenticatedUserId(response));
+    response.json({role, capabilities: getRoleCapabilities(role)});
+  }));
+
+  app.use('/api/admin', requireAdmin(pool));
+
+  app.get('/api/admin/users', asyncHandler(async (request, response) => {
+    try {
+      const userId = parseUserSearchQuery(request.query);
+      response.json({users: [await getAdminUserSummary(pool, userId)]});
+    } catch (error) {
+      if (error instanceof AdminValidationError) {
+        response.status(400).json({error: 'INVALID_REQUEST'});
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.get('/api/admin/users/:userid', asyncHandler(async (request, response) => {
+    try {
+      const userId = parseDiscordUserId(request.params.userid);
+      const pagination = parseAdminPagination(request.query, 'beforeTransactionId');
+      response.json(await getAdminUserDetail(
+        pool,
+        response.locals.userRole as UserRole,
+        userId,
+        pagination,
+      ));
+    } catch (error) {
+      if (error instanceof AdminValidationError) {
+        response.status(400).json({error: 'INVALID_REQUEST'});
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  const handleChalkAdjustment = (kind: 'grant' | 'deduct'): RequestHandler => asyncHandler(
+    async (request, response) => {
+      try {
+        const targetUserId = parseDiscordUserId(request.params.userid);
+        const input = parseChalkAdjustmentBody(request.body);
+        response.json(await applyChalkAdjustment(
+          pool,
+          kind,
+          targetUserId,
+          getAuthenticatedUserId(response),
+          input,
+        ));
+      } catch (error) {
+        if (error instanceof AdminValidationError) {
+          response.status(400).json({error: 'INVALID_REQUEST'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === '23514') {
+          response.status(409).json({error: 'INSUFFICIENT_CHALK'});
+          return;
+        }
+        if (code === '22000') {
+          response.status(409).json({error: 'IDEMPOTENCY_CONFLICT'});
+          return;
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post(
+    '/api/admin/users/:userid/chalk/grant',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    adminMutationRateLimiter,
+    adminJsonParser,
+    handleChalkAdjustment('grant'),
+  );
+
+  app.post(
+    '/api/admin/users/:userid/chalk/deduct',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    adminMutationRateLimiter,
+    adminJsonParser,
+    handleChalkAdjustment('deduct'),
+  );
+
+  app.post(
+    '/api/admin/users/:userid/role',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    adminMutationRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const targetUserId = parseDiscordUserId(request.params.userid);
+        const input = parseRoleChangeBody(request.body);
+        response.json(await changeUserRole(
+          pool,
+          targetUserId,
+          getAuthenticatedUserId(response),
+          input,
+        ));
+      } catch (error) {
+        if (error instanceof AdminValidationError) {
+          response.status(400).json({error: 'INVALID_REQUEST'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === 'GSR01') {
+          response.status(409).json({error: 'ROLE_CHANGED'});
+          return;
+        }
+        if (code === '42501') {
+          response.status(403).json({error: 'ROLE_NOT_ALLOWED'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.get('/api/admin/role-audit', asyncHandler(async (request, response) => {
+    try {
+      const pagination = parseAdminPagination(request.query, 'beforeAuditId');
+      response.json(await getRoleAudit(pool, pagination));
+    } catch (error) {
+      if (error instanceof AdminValidationError) {
+        response.status(400).json({error: 'INVALID_REQUEST'});
+        return;
+      }
+      throw error;
+    }
+  }));
 
   app.get('/auth/discord', asyncHandler(async (request, response) => {
     response.set('Cache-Control', 'no-store');

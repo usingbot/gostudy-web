@@ -1,12 +1,13 @@
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
-import { Home, Backpack, Grid2X2, Settings, LogOut } from 'lucide-react';
+import { Home, Backpack, Grid2X2, Settings, LogOut, ShieldCheck } from 'lucide-react';
 import {useState} from 'react';
 import {useAuth} from '../auth/AuthProvider';
+import {shouldShowAdminNavigation} from '../auth/admin-capabilities';
 
 export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const {logout} = useAuth();
+  const {admin, logout} = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutFailed, setLogoutFailed] = useState(false);
 
@@ -27,6 +28,9 @@ export default function Layout() {
     { name: 'Inventory', path: '/inventory', icon: Backpack },
     { name: 'Study Board', path: '/board', icon: Grid2X2 },
     { name: 'Settings', path: '/settings', icon: Settings },
+    ...(shouldShowAdminNavigation(admin)
+      ? [{name: 'Admin', path: '/admin', icon: ShieldCheck}]
+      : []),
   ];
 
   return (

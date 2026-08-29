@@ -3,7 +3,7 @@ import 'express-session';
 declare module 'express-session' {
   interface SessionData {
     oauthState?: string;
-    oauthReturnTo?: '/dashboard' | '/inventory' | '/settings';
+    oauthReturnTo?: '/dashboard' | '/inventory' | '/board' | '/settings' | '/admin';
     discordUserId?: string;
     username?: string;
     globalName?: string | null;

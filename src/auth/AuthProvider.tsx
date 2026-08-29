@@ -8,6 +8,9 @@ import {
   useState,
 } from 'react';
 
+import {fetchAdminSelf} from '../api/admin';
+import type {AdminSelf} from '../types';
+
 export interface AuthUser {
   id: string;
   username: string;
@@ -16,11 +19,15 @@ export interface AuthUser {
 }
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
+type AdminStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 interface AuthContextValue {
   user: AuthUser | null;
   status: AuthStatus;
+  admin: AdminSelf | null;
+  adminStatus: AdminStatus;
   refresh: () => Promise<void>;
+  refreshAdmin: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -43,6 +50,19 @@ async function fetchCurrentUser(): Promise<AuthUser | null> {
 export function AuthProvider({children}: {children: ReactNode}) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
+  const [admin, setAdmin] = useState<AdminSelf | null>(null);
+  const [adminStatus, setAdminStatus] = useState<AdminStatus>('idle');
+
+  const refreshAdmin = useCallback(async () => {
+    setAdminStatus('loading');
+    try {
+      setAdmin(await fetchAdminSelf());
+      setAdminStatus('ready');
+    } catch {
+      setAdmin(null);
+      setAdminStatus('error');
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     setStatus('loading');
@@ -50,11 +70,19 @@ export function AuthProvider({children}: {children: ReactNode}) {
       const currentUser = await fetchCurrentUser();
       setUser(currentUser);
       setStatus(currentUser ? 'authenticated' : 'unauthenticated');
+      if (currentUser) {
+        await refreshAdmin();
+      } else {
+        setAdmin(null);
+        setAdminStatus('idle');
+      }
     } catch {
       setUser(null);
       setStatus('error');
+      setAdmin(null);
+      setAdminStatus('idle');
     }
-  }, []);
+  }, [refreshAdmin]);
 
   useEffect(() => {
     void refresh();
@@ -71,9 +99,19 @@ export function AuthProvider({children}: {children: ReactNode}) {
     }
     setUser(null);
     setStatus('unauthenticated');
+    setAdmin(null);
+    setAdminStatus('idle');
   }, []);
 
-  const value = useMemo(() => ({user, status, refresh, logout}), [user, status, refresh, logout]);
+  const value = useMemo(() => ({
+    user,
+    status,
+    admin,
+    adminStatus,
+    refresh,
+    refreshAdmin,
+    logout,
+  }), [user, status, admin, adminStatus, refresh, refreshAdmin, logout]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

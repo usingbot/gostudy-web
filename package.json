@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist dist-server",
     "lint": "npm run typecheck",
-    "test": "tsx --test server/product-data.test.ts server/board-data.test.ts server/reward-seen.test.ts server/admin-auth.test.ts server/admin-data.test.ts server/admin-migration.test.ts server/admin-rate-limit.test.ts server/admin-routes.test.ts server/admin-validation.test.ts server/shop-data.test.ts server/shop-migration.test.ts server/shop-routes.test.ts server/shop-ui.test.ts server/shop-validation.test.ts src/api/productData.test.ts src/api/shop.test.ts src/api/admin.test.ts src/auth/admin-capabilities.test.ts",
+    "test": "tsx --test server/product-data.test.ts server/board-data.test.ts server/board-migration.test.ts server/board-ui.test.ts server/reward-seen.test.ts server/admin-auth.test.ts server/admin-data.test.ts server/admin-migration.test.ts server/admin-rate-limit.test.ts server/admin-routes.test.ts server/admin-validation.test.ts server/shop-data.test.ts server/shop-migration.test.ts server/shop-routes.test.ts server/shop-ui.test.ts server/shop-validation.test.ts src/api/productData.test.ts src/api/board.test.ts src/api/shop.test.ts src/api/admin.test.ts src/auth/admin-capabilities.test.ts src/sticky-note.test.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {

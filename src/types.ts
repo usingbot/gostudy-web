@@ -77,10 +77,36 @@ export interface BoardPosition {
   y: number;
 }
 
-export interface BoardItem extends Omit<InventoryItem, 'isNew'>, BoardPosition {}
+interface BoardObjectBase extends BoardPosition {
+  boardObjectId: string;
+}
+
+export interface RewardBoardObject extends Omit<InventoryItem, 'isNew'>, BoardObjectBase {
+  source: 'reward';
+}
+
+export interface ShopBoardObject extends BoardObjectBase {
+  source: 'shop';
+  ownedItemId: string;
+  itemKey: string;
+  displayName: string;
+  itemType: BoardShopItemType;
+  body?: string;
+}
+
+export type BoardObject = RewardBoardObject | ShopBoardObject;
+
+export interface BoardPositionResult extends BoardPosition {
+  boardObjectId: string;
+}
+
+export interface StickyNoteContent {
+  ownedItemId: string;
+  body: string;
+}
 
 export interface BoardData {
-  items: BoardItem[];
+  items: BoardObject[];
 }
 
 export type UserRole = 'owner' | 'admin' | 'tester' | 'user';

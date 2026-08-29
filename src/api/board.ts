@@ -1,5 +1,13 @@
 import {ApiError} from './productData';
-import type {BoardData, BoardItem, BoardPosition} from '../types';
+import type {
+  BoardData,
+  BoardObject,
+  BoardPosition,
+  BoardPositionResult,
+  RewardBoardObject,
+  ShopBoardObject,
+  StickyNoteContent,
+} from '../types';
 
 interface ErrorResponse {
   code?: unknown;
@@ -40,7 +48,7 @@ export function fetchBoard(signal?: AbortSignal): Promise<BoardData> {
 export function addBoardItem(
   hourRewardId: string,
   position: BoardPosition,
-): Promise<BoardItem> {
+): Promise<RewardBoardObject> {
   return requestJson('/api/board/items', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -48,19 +56,30 @@ export function addBoardItem(
   });
 }
 
-export function moveBoardItem(
-  hourRewardId: string,
+export function addShopBoardItem(
+  ownedItemId: string,
   position: BoardPosition,
-): Promise<BoardItem> {
-  return requestJson(`/api/board/items/${encodeURIComponent(hourRewardId)}`, {
+): Promise<ShopBoardObject> {
+  return requestJson('/api/board/owned-items', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ownedItemId, ...position}),
+  });
+}
+
+export function moveBoardObject(
+  boardObjectId: string,
+  position: BoardPosition,
+): Promise<BoardPositionResult> {
+  return requestJson(`/api/board/objects/${encodeURIComponent(boardObjectId)}`, {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(position),
   });
 }
 
-export async function removeBoardItem(hourRewardId: string): Promise<void> {
-  const response = await fetch(`/api/board/items/${encodeURIComponent(hourRewardId)}`, {
+export async function removeBoardObject(boardObjectId: string): Promise<void> {
+  const response = await fetch(`/api/board/objects/${encodeURIComponent(boardObjectId)}`, {
     method: 'DELETE',
     credentials: 'same-origin',
     headers: {Accept: 'application/json'},
@@ -68,4 +87,24 @@ export async function removeBoardItem(hourRewardId: string): Promise<void> {
   if (!response.ok) {
     throw await readApiError(response);
   }
+}
+
+export function updateStickyNote(
+  ownedItemId: string,
+  body: string,
+): Promise<StickyNoteContent> {
+  return requestJson(`/api/board/sticky-notes/${encodeURIComponent(ownedItemId)}`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({body}),
+  });
+}
+
+export function isStickyNoteObject(item: BoardObject): item is ShopBoardObject & {
+  itemType: 'sticky_note';
+  body: string;
+} {
+  return item.source === 'shop'
+    && item.itemType === 'sticky_note'
+    && typeof item.body === 'string';
 }

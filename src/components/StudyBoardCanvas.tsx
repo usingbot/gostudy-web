@@ -1,16 +1,17 @@
 import {useEffect, useRef, useState} from 'react';
 
 import BoardItem, {type BoardItemSaveState} from './BoardItem';
-import type {BoardItem as BoardItemData, BoardPosition} from '../types';
+import type {BoardObject, BoardPosition} from '../types';
 
 interface StudyBoardCanvasProps {
-  items: BoardItemData[];
+  items: BoardObject[];
   saveStates: Readonly<Record<string, BoardItemSaveState>>;
-  onPositionChange: (hourRewardId: string, position: BoardPosition) => void;
-  onPositionCommit: (hourRewardId: string, position: BoardPosition) => void;
-  onRemove: (hourRewardId: string) => void;
-  onRetry: (hourRewardId: string) => void;
-  onRollback: (hourRewardId: string) => void;
+  onPositionChange: (boardObjectId: string, position: BoardPosition) => void;
+  onPositionCommit: (boardObjectId: string, position: BoardPosition) => void;
+  onRemove: (boardObjectId: string) => void;
+  onRetry: (boardObjectId: string) => void;
+  onRollback: (boardObjectId: string) => void;
+  onEditStickyNote: (ownedItemId: string) => void;
 }
 
 export default function StudyBoardCanvas({
@@ -21,6 +22,7 @@ export default function StudyBoardCanvas({
   onRemove,
   onRetry,
   onRollback,
+  onEditStickyNote,
 }: StudyBoardCanvasProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const [boardSize, setBoardSize] = useState({width: 0, height: 0});
@@ -40,7 +42,8 @@ export default function StudyBoardCanvas({
     return () => observer.disconnect();
   }, []);
 
-  const itemSize = Math.max(48, Math.min(86, boardSize.width * 0.105));
+  const rewardItemSize = Math.max(48, Math.min(86, boardSize.width * 0.105));
+  const stickyNoteSize = Math.max(72, Math.min(124, boardSize.width * 0.15));
 
   return (
     <div className="rounded-3xl border border-slate-700/80 bg-[#111113] p-3 shadow-2xl shadow-black/30 sm:p-5">
@@ -65,23 +68,26 @@ export default function StudyBoardCanvas({
             <div className="mb-3 h-2 w-2 rounded-full bg-indigo-400 shadow-[0_0_24px_8px_rgba(129,140,248,0.25)]" />
             <h2 className="text-sm font-semibold text-slate-300 sm:text-lg">Your study wall is ready</h2>
             <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-500 sm:text-sm">
-              Add an earned item from Inventory, then drag it wherever it belongs.
+              Add an item from Inventory, then drag it wherever it belongs.
             </p>
           </div>
         )}
         {boardSize.width > 0 && items.map((item) => (
           <BoardItem
-            key={item.hourRewardId}
+            key={item.boardObjectId}
             item={item}
             boardRef={boardRef}
             boardSize={boardSize}
-            itemSize={itemSize}
-            saveState={saveStates[item.hourRewardId] ?? 'idle'}
+            itemSize={item.source === 'shop' && item.itemType === 'sticky_note'
+              ? stickyNoteSize
+              : rewardItemSize}
+            saveState={saveStates[item.boardObjectId] ?? 'idle'}
             onPositionChange={onPositionChange}
             onPositionCommit={onPositionCommit}
             onRemove={onRemove}
             onRetry={onRetry}
             onRollback={onRollback}
+            onEditStickyNote={onEditStickyNote}
           />
         ))}
       </div>

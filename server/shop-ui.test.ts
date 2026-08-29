@@ -29,11 +29,12 @@ test('buy flow confirms, disables duplicate submit, and retains request ID for s
   assert.doesNotMatch(shop, /chalkBalance\s*[-+]/);
 });
 
-test('Inventory preserves reward placement and disables future Shop placement honestly', async () => {
+test('Inventory preserves reward placement and accurately stages unsupported Shop types', async () => {
   const inventory = await readFile('src/pages/Inventory.tsx', 'utf8');
   assert.match(inventory, /items\.map/);
   assert.match(inventory, /shopItems\.map/);
   assert.match(inventory, /Add to Board/);
+  assert.match(inventory, /item\.itemType === 'sticky_note' \|\| item\.itemType === 'decoration'/);
   assert.match(inventory, /Board support coming next/);
   assert.match(inventory, /aria-disabled="true"/);
 });

@@ -8,7 +8,7 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migration `0005_create_board_shop.sql` requires StudyLion schema v20 and its private board-purchase Chalk wrapper.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` and `0006_create_board_objects_v2.sql` require StudyLion schema v20; deploy migration 0006 before deploying an application build that reads generic board objects.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
@@ -34,12 +34,17 @@ The `gostudy_web` role receives only `SELECT` and `INSERT` on `public.web_reward
 
 ## Study Board API
 
-- `GET /api/board` returns the authenticated user's placed inventory instances.
-- `POST /api/board/items` places one owned inventory instance at normalized `x` and `y` coordinates.
-- `PATCH /api/board/items/:hourRewardId` saves a placed item's normalized position.
-- `DELETE /api/board/items/:hourRewardId` idempotently removes the current user's placement.
+- `GET /api/board` returns generic board objects as a `source: "reward" | "shop"` discriminated union. Every placement has a string `boardObjectId`; reward and owned-item BIGINT IDs also remain strings.
+- `POST /api/board/items` retains the legacy reward placement body `{hourRewardId,x,y}`.
+- `POST /api/board/owned-items` places one owned Sticky Note or Basic Decoration using the strict body `{ownedItemId,x,y}`. GIF Slot and Photo Frame remain unplaceable.
+- `PATCH /api/board/objects/:boardObjectId` saves normalized coordinates for either source type.
+- `DELETE /api/board/objects/:boardObjectId` idempotently removes only the placement.
+- `PATCH /api/board/sticky-notes/:ownedItemId` saves a strict `{body}` plain-text note. Empty notes are allowed.
+- `PATCH` and `DELETE /api/board/items/:hourRewardId` remain as reward-only compatibility routes.
 
-Board writes require the request `Origin` to match `APP_URL`. Ownership is derived from the authenticated session and verified against the product inventory tables. A board can contain at most 100 item instances. The web database role needs `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges on `public.web_study_boards` and `public.web_study_board_items`; product-table access remains read-only.
+Board writes require the request `Origin` to match `APP_URL`; JSON writes also require `application/json` and use a 16 KiB parser limit. User identity and catalog type come only from the session and database. The browser cannot choose `userid`, `object_type`, an arbitrary asset URL, or a Chalk mutation. A board can contain at most 100 objects across reward and Shop sources; placement serializes on the user's board row before counting.
+
+Sticky Note text accepts at most 2,000 Unicode code points and 250 non-empty, whitespace-delimited words. The server is the canonical word-limit boundary. PostgreSQL independently enforces `char_length(body) <= 2000`; it intentionally does not duplicate the word rule because PostgreSQL and JavaScript whitespace classes can diverge for Unicode input. React renders the body only as a text child—HTML-like and Markdown-like input remains literal.
 
 ## Admin Panel and web roles
 
@@ -117,9 +122,36 @@ TO gostudy_web_owner;
 
 Do not make `gostudy_web` a member of `gostudy_web_owner` or `gostudy_chalk_owner`, and do not grant `gostudy_web` direct execution of `gostudy_purchase_board_item_chalk`. Keep the app unavailable to purchase traffic until the ownership transfer and owner-only wrapper grant are complete.
 
-Inventory returns legacy study rewards in `items` and purchased board instances in `shopItems`. Legacy rewards keep their existing Add to Board behavior. Shop items deliberately show “Board support coming next” because the current board schema accepts only legacy `hourRewardId` values.
+Inventory returns legacy study rewards in `items` and purchased board instances in `shopItems`. Legacy rewards keep their existing Add to Board behavior. Sticky Note and Basic Decoration instances show Add to Board or On Board; GIF Slot and Photo Frame continue to show “Board support coming next.” Adding, removing, or re-adding an owned item never invokes the purchase function and never spends or refunds Chalk.
 
 Disposable v20 coverage lives in `tests/integration/chapter3b_v20_setup.sql` and `tests/integration/chapter3b_board_shop.sql`. Load StudyLion schema v20 and web migrations 0001–0004 into a throwaway database, run the setup, apply migration 0005, and then run the Shop integration file. Never run this sequence against `lion_data`.
+
+## Generic board objects and migration 0006
+
+Migration 0006 takes an `ACCESS EXCLUSIVE` lock on the legacy placement table inside one transaction, creates `web_study_board_objects`, copies every legacy row as a reward object without transforming coordinates or timestamps, compares row counts, and performs bidirectional `EXCEPT` checks over `(userid,hour_rewardid,x,y)`. Only after those assertions pass does it drop `web_study_board_items`; any failure rolls back the table creation, copy, and drop together.
+
+Reward and owned-instance uniqueness use separate partial unique indexes. The generic source-shape check makes reward and Shop identifiers mutually exclusive, and a trigger proves every Shop object's session owner and `object_type` against the owned catalog item. No web-owned table has a foreign key to StudyLion reward tables. Shop placement and Sticky Note content reference `web_owned_board_items` with `ON DELETE RESTRICT`: removing a placement cannot delete ownership, purchase history, or note text, and a re-added note restores its prior text.
+
+Sticky Note writes use the `SECURITY DEFINER` function `web_upsert_sticky_note(bigint,bigint,text)`. The runtime role can read note content but cannot mutate the note table directly. The function validates positive IDs, exact ownership, the `sticky-note` item key, and the database character bound before upserting.
+
+Apply migration 0006 with a controlled deployment role while board writes are paused, then transfer its objects to `gostudy_web_owner` before serving the new application build:
+
+```sql
+ALTER TABLE public.web_study_board_objects OWNER TO gostudy_web_owner;
+ALTER SEQUENCE public.web_study_board_objects_board_objectid_seq
+  OWNER TO gostudy_web_owner;
+ALTER TABLE public.web_sticky_notes OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_validate_board_shop_object()
+  OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_validate_sticky_note_owner()
+  OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_upsert_sticky_note(bigint, bigint, text)
+  OWNER TO gostudy_web_owner;
+```
+
+Do not make `gostudy_web` a member of `gostudy_web_owner`. The migration grants only placement table access, coordinate-only UPDATE, identity-sequence use, note SELECT, and execution of the ownership-checking note function.
+
+Disposable Chapter 4 coverage lives in `tests/integration/chapter4_legacy_board_setup.sql` and `tests/integration/chapter4_board_objects.sql`. Starting from StudyLion schema v20 and web migrations 0001–0005 in a throwaway database, load the legacy fixture, apply migration 0006, transfer ownership as the assertion script does, and run the Chapter 4 assertions. The suite proves exact legacy preservation, both uniqueness indexes, strict source/type ownership, note boundaries, remove/re-add persistence, and runtime permissions. Never run migration 0006 or the integration files against `lion_data` during validation.
 
 ## Production
 

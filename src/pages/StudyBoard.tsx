@@ -1,12 +1,19 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {LayoutGrid, RefreshCw} from 'lucide-react';
 
-import {fetchBoard, moveBoardItem, removeBoardItem} from '../api/board';
+import {
+  fetchBoard,
+  isStickyNoteObject,
+  moveBoardObject,
+  removeBoardObject,
+  updateStickyNote,
+} from '../api/board';
 import {ApiError} from '../api/productData';
 import {useAuth} from '../auth/AuthProvider';
 import StudyBoardCanvas from '../components/StudyBoardCanvas';
 import type {BoardItemSaveState} from '../components/BoardItem';
-import type {BoardItem, BoardPosition} from '../types';
+import StickyNoteEditor from '../components/StickyNoteEditor';
+import type {BoardObject, BoardPosition} from '../types';
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = {...record};
@@ -16,12 +23,13 @@ function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T
 
 export default function StudyBoard() {
   const {refresh} = useAuth();
-  const [items, setItems] = useState<BoardItem[]>([]);
+  const [items, setItems] = useState<BoardObject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<Record<string, BoardItemSaveState>>({});
   const [requestVersion, setRequestVersion] = useState(0);
+  const [editingOwnedItemId, setEditingOwnedItemId] = useState<string | null>(null);
   const confirmedPositionsRef = useRef(new Map<string, BoardPosition>());
   const pendingPositionsRef = useRef(new Map<string, BoardPosition>());
   const savingIdsRef = useRef(new Set<string>());
@@ -43,7 +51,7 @@ export default function StudyBoard() {
       .then((board) => {
         setItems(board.items);
         confirmedPositionsRef.current = new Map(
-          board.items.map((item) => [item.hourRewardId, {x: item.x, y: item.y}]),
+          board.items.map((item) => [item.boardObjectId, {x: item.x, y: item.y}]),
         );
         pendingPositionsRef.current.clear();
         savingIdsRef.current.clear();
@@ -67,43 +75,43 @@ export default function StudyBoard() {
     return () => controller.abort();
   }, [refresh, requestVersion]);
 
-  const updateLocalPosition = useCallback((hourRewardId: string, position: BoardPosition) => {
+  const updateLocalPosition = useCallback((boardObjectId: string, position: BoardPosition) => {
     setItems((currentItems) => currentItems.map((item) => (
-      item.hourRewardId === hourRewardId ? {...item, ...position} : item
+      item.boardObjectId === boardObjectId ? {...item, ...position} : item
     )));
   }, []);
 
-  const flushPosition = useCallback(async (hourRewardId: string) => {
-    if (savingIdsRef.current.has(hourRewardId)) {
+  const flushPosition = useCallback(async (boardObjectId: string) => {
+    if (savingIdsRef.current.has(boardObjectId)) {
       return;
     }
-    savingIdsRef.current.add(hourRewardId);
-    setSaveStates((current) => ({...current, [hourRewardId]: 'saving'}));
+    savingIdsRef.current.add(boardObjectId);
+    setSaveStates((current) => ({...current, [boardObjectId]: 'saving'}));
     let failed = false;
 
     try {
-      while (pendingPositionsRef.current.has(hourRewardId)) {
-        const position = pendingPositionsRef.current.get(hourRewardId);
+      while (pendingPositionsRef.current.has(boardObjectId)) {
+        const position = pendingPositionsRef.current.get(boardObjectId);
         if (!position) {
           break;
         }
-        pendingPositionsRef.current.delete(hourRewardId);
+        pendingPositionsRef.current.delete(boardObjectId);
         try {
-          const savedItem = await moveBoardItem(hourRewardId, position);
-          confirmedPositionsRef.current.set(hourRewardId, {x: savedItem.x, y: savedItem.y});
-          if (!pendingPositionsRef.current.has(hourRewardId) && mountedRef.current) {
+          const savedPosition = await moveBoardObject(boardObjectId, position);
+          confirmedPositionsRef.current.set(boardObjectId, {x: savedPosition.x, y: savedPosition.y});
+          if (!pendingPositionsRef.current.has(boardObjectId) && mountedRef.current) {
             setItems((currentItems) => currentItems.map((item) => (
-              item.hourRewardId === hourRewardId ? savedItem : item
+              item.boardObjectId === boardObjectId ? {...item, ...savedPosition} : item
             )));
           }
         } catch (error) {
-          if (pendingPositionsRef.current.has(hourRewardId)) {
+          if (pendingPositionsRef.current.has(boardObjectId)) {
             continue;
           }
-          pendingPositionsRef.current.set(hourRewardId, position);
+          pendingPositionsRef.current.set(boardObjectId, position);
           failed = true;
           if (mountedRef.current) {
-            setSaveStates((current) => ({...current, [hourRewardId]: 'error'}));
+            setSaveStates((current) => ({...current, [boardObjectId]: 'error'}));
           }
           if (error instanceof ApiError && error.status === 401) {
             void refresh();
@@ -112,55 +120,77 @@ export default function StudyBoard() {
         }
       }
       if (!failed && mountedRef.current) {
-        setSaveStates((current) => withoutKey(current, hourRewardId));
+        setSaveStates((current) => withoutKey(current, boardObjectId));
       }
     } finally {
-      savingIdsRef.current.delete(hourRewardId);
+      savingIdsRef.current.delete(boardObjectId);
     }
   }, [refresh]);
 
-  const handlePositionCommit = useCallback((hourRewardId: string, position: BoardPosition) => {
-    pendingPositionsRef.current.set(hourRewardId, position);
-    void flushPosition(hourRewardId);
+  const handlePositionCommit = useCallback((boardObjectId: string, position: BoardPosition) => {
+    pendingPositionsRef.current.set(boardObjectId, position);
+    void flushPosition(boardObjectId);
   }, [flushPosition]);
 
-  const handleRetry = useCallback((hourRewardId: string) => {
-    if (pendingPositionsRef.current.has(hourRewardId)) {
-      void flushPosition(hourRewardId);
+  const handleRetry = useCallback((boardObjectId: string) => {
+    if (pendingPositionsRef.current.has(boardObjectId)) {
+      void flushPosition(boardObjectId);
     }
   }, [flushPosition]);
 
-  const handleRollback = useCallback((hourRewardId: string) => {
-    pendingPositionsRef.current.delete(hourRewardId);
-    const confirmed = confirmedPositionsRef.current.get(hourRewardId);
+  const handleRollback = useCallback((boardObjectId: string) => {
+    pendingPositionsRef.current.delete(boardObjectId);
+    const confirmed = confirmedPositionsRef.current.get(boardObjectId);
     if (confirmed) {
-      updateLocalPosition(hourRewardId, confirmed);
+      updateLocalPosition(boardObjectId, confirmed);
     }
-    setSaveStates((current) => withoutKey(current, hourRewardId));
+    setSaveStates((current) => withoutKey(current, boardObjectId));
   }, [updateLocalPosition]);
 
-  const handleRemove = useCallback(async (hourRewardId: string) => {
-    if (savingIdsRef.current.has(hourRewardId)) {
+  const handleRemove = useCallback(async (boardObjectId: string) => {
+    if (savingIdsRef.current.has(boardObjectId)) {
       return;
     }
     setActionError(null);
-    setSaveStates((current) => ({...current, [hourRewardId]: 'removing'}));
+    setSaveStates((current) => ({...current, [boardObjectId]: 'removing'}));
     try {
-      await removeBoardItem(hourRewardId);
-      pendingPositionsRef.current.delete(hourRewardId);
-      confirmedPositionsRef.current.delete(hourRewardId);
+      await removeBoardObject(boardObjectId);
+      pendingPositionsRef.current.delete(boardObjectId);
+      confirmedPositionsRef.current.delete(boardObjectId);
       if (mountedRef.current) {
-        setItems((currentItems) => currentItems.filter((item) => item.hourRewardId !== hourRewardId));
-        setSaveStates((current) => withoutKey(current, hourRewardId));
+        setItems((currentItems) => currentItems.filter((item) => item.boardObjectId !== boardObjectId));
+        setSaveStates((current) => withoutKey(current, boardObjectId));
       }
     } catch (error) {
       if (mountedRef.current) {
-        setSaveStates((current) => withoutKey(current, hourRewardId));
+        setSaveStates((current) => withoutKey(current, boardObjectId));
         setActionError('That item could not be removed. Please try again.');
       }
       if (error instanceof ApiError && error.status === 401) {
         void refresh();
       }
+    }
+  }, [refresh]);
+
+  const editingNote = items.find((item) => (
+    isStickyNoteObject(item) && item.ownedItemId === editingOwnedItemId
+  ));
+
+  const handleSaveStickyNote = useCallback(async (ownedItemId: string, body: string) => {
+    try {
+      const saved = await updateStickyNote(ownedItemId, body);
+      if (mountedRef.current) {
+        setItems((currentItems) => currentItems.map((item) => (
+          isStickyNoteObject(item) && item.ownedItemId === saved.ownedItemId
+            ? {...item, body: saved.body}
+            : item
+        )));
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        void refresh();
+      }
+      throw error;
     }
   }, [refresh]);
 
@@ -173,7 +203,7 @@ export default function StudyBoard() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-50">Study Board</h1>
-            <p className="text-sm text-slate-400">Arrange your earned rewards on a personal study wall.</p>
+            <p className="text-sm text-slate-400">Arrange earned rewards and purchased objects on your personal study wall.</p>
           </div>
         </div>
         {!isLoading && !loadFailed && (
@@ -211,9 +241,18 @@ export default function StudyBoard() {
           saveStates={saveStates}
           onPositionChange={updateLocalPosition}
           onPositionCommit={handlePositionCommit}
-          onRemove={(hourRewardId) => void handleRemove(hourRewardId)}
+          onRemove={(boardObjectId) => void handleRemove(boardObjectId)}
           onRetry={handleRetry}
           onRollback={handleRollback}
+          onEditStickyNote={setEditingOwnedItemId}
+        />
+      )}
+
+      {editingNote && (
+        <StickyNoteEditor
+          note={editingNote}
+          onClose={() => setEditingOwnedItemId(null)}
+          onSave={(body) => handleSaveStickyNote(editingNote.ownedItemId, body)}
         />
       )}
 

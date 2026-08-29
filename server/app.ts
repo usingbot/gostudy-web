@@ -42,15 +42,24 @@ import {
   BoardItemAlreadyPlacedError,
   BoardItemNotFoundError,
   BoardItemNotOwnedError,
+  BoardItemUnsupportedError,
   BoardValidationError,
   createBoardItem,
+  createShopBoardItem,
+  deleteBoardObject,
   deleteBoardItem,
   getBoardItems,
   MAX_BOARD_ITEMS,
+  parseBoardObjectId,
   parseBoardItemId,
   parseBoardPlacementBody,
   parseBoardPositionBody,
+  parseOwnedItemId,
+  parseShopBoardPlacementBody,
+  parseStickyNoteBody,
+  updateBoardObject,
   updateBoardItem,
+  updateStickyNote,
 } from './board-data.js';
 import {createDiscordAuthorizationUrl, exchangeCodeForDiscordUser} from './discord.js';
 import {
@@ -567,6 +576,7 @@ export function createApp(
   app.post(
     '/api/board/items',
     requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
     asyncHandler(async (request, response) => {
       try {
         const input = parseBoardPlacementBody(request.body);
@@ -601,9 +611,138 @@ export function createApp(
     }),
   );
 
+  app.post(
+    '/api/board/owned-items',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    asyncHandler(async (request, response) => {
+      try {
+        const input = parseShopBoardPlacementBody(request.body);
+        const item = await createShopBoardItem(pool, getAuthenticatedUserId(response), input);
+        response.status(201).json(item);
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid owned board item'});
+          return;
+        }
+        if (error instanceof BoardItemNotOwnedError) {
+          response.status(404).json({error: 'Owned board item not found'});
+          return;
+        }
+        if (error instanceof BoardItemUnsupportedError) {
+          response.status(409).json({
+            error: 'Board support is not available for this item yet',
+            code: 'BOARD_ITEM_NOT_PLACEABLE',
+          });
+          return;
+        }
+        if (error instanceof BoardItemAlreadyPlacedError) {
+          response.status(409).json({
+            error: 'Item is already on the Study Board',
+            code: 'BOARD_ITEM_ALREADY_PLACED',
+          });
+          return;
+        }
+        if (error instanceof BoardCapacityError) {
+          response.status(409).json({
+            error: 'Study Board capacity reached',
+            code: 'BOARD_CAPACITY_REACHED',
+            limit: MAX_BOARD_ITEMS,
+          });
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.patch(
+    '/api/board/objects/:boardObjectId',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    asyncHandler(async (request, response) => {
+      try {
+        const boardObjectId = parseBoardObjectId(request.params.boardObjectId);
+        const position = parseBoardPositionBody(request.body);
+        response.json(await updateBoardObject(
+          pool,
+          getAuthenticatedUserId(response),
+          boardObjectId,
+          position,
+        ));
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid board position'});
+          return;
+        }
+        if (error instanceof BoardItemNotFoundError) {
+          response.status(404).json({error: 'Board object not found'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.delete(
+    '/api/board/objects/:boardObjectId',
+    requireAppOrigin(config.appUrl.origin),
+    asyncHandler(async (request, response) => {
+      try {
+        const boardObjectId = parseBoardObjectId(request.params.boardObjectId);
+        await deleteBoardObject(pool, getAuthenticatedUserId(response), boardObjectId);
+        response.sendStatus(204);
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid board object'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.patch(
+    '/api/board/sticky-notes/:ownedItemId',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    asyncHandler(async (request, response) => {
+      try {
+        const ownedItemId = parseOwnedItemId(request.params.ownedItemId);
+        const body = parseStickyNoteBody(request.body);
+        response.json(await updateStickyNote(
+          pool,
+          getAuthenticatedUserId(response),
+          ownedItemId,
+          body,
+        ));
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid Sticky Note body'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === 'GSB04') {
+          response.status(404).json({error: 'Sticky Note not found'});
+          return;
+        }
+        if (code === 'GSB05') {
+          response.status(409).json({error: 'Owned item is not a Sticky Note'});
+          return;
+        }
+        if (code === '22023' || code === '23514') {
+          response.status(400).json({error: 'Invalid Sticky Note body'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
   app.patch(
     '/api/board/items/:hourRewardId',
     requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
     asyncHandler(async (request, response) => {
       try {
         const hourRewardId = parseBoardItemId(request.params.hourRewardId);

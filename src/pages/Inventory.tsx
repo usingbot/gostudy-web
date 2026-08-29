@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {Backpack, Check, Clock3, LoaderCircle, Plus} from 'lucide-react';
 import {motion} from 'motion/react';
 
-import {addBoardItem, fetchBoard} from '../api/board';
+import {addBoardItem, addShopBoardItem, fetchBoard} from '../api/board';
 import {
   ApiError,
   fetchInventoryPage,
@@ -11,7 +11,7 @@ import {
 } from '../api/productData';
 import {useAuth} from '../auth/AuthProvider';
 import {renderRewardAsset, renderShopItem} from '../components/IconMap';
-import type {BoardItem, BoardPosition, InventoryItem, ShopInventoryItem} from '../types';
+import type {BoardObject, BoardPosition, InventoryItem, ShopInventoryItem} from '../types';
 
 const PAGE_SIZE = 20;
 
@@ -19,7 +19,7 @@ function formatEarnedAt(value: string): string {
   return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(value));
 }
 
-function findFirstFreePosition(boardItems: BoardItem[]): BoardPosition | null {
+function findFirstFreePosition(boardItems: BoardObject[]): BoardPosition | null {
   if (boardItems.length >= 100) {
     return null;
   }
@@ -44,7 +44,7 @@ export default function Inventory() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
+  const [boardItems, setBoardItems] = useState<BoardObject[]>([]);
   const [placingItemId, setPlacingItemId] = useState<string | null>(null);
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
@@ -142,7 +142,8 @@ export default function Inventory() {
       return;
     }
     setPlacementError(null);
-    setPlacingItemId(item.hourRewardId);
+    const placementKey = `reward:${item.hourRewardId}`;
+    setPlacingItemId(placementKey);
     try {
       const placedItem = await addBoardItem(item.hourRewardId, position);
       setBoardItems((currentItems) => [...currentItems, placedItem]);
@@ -166,7 +167,47 @@ export default function Inventory() {
     }
   };
 
-  const placedItemIds = new Set(boardItems.map((item) => item.hourRewardId));
+  const handleAddShopItemToBoard = async (item: ShopInventoryItem) => {
+    if (placingItemId || (item.itemType !== 'sticky_note' && item.itemType !== 'decoration')) {
+      return;
+    }
+    const position = findFirstFreePosition(boardItems);
+    if (!position) {
+      setPlacementError('Your Study Board already has the maximum of 100 items.');
+      return;
+    }
+    const placementKey = `shop:${item.ownedItemId}`;
+    setPlacementError(null);
+    setPlacingItemId(placementKey);
+    try {
+      const placedItem = await addShopBoardItem(item.ownedItemId, position);
+      setBoardItems((currentItems) => [...currentItems, placedItem]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await refresh();
+      } else if (error instanceof ApiError && error.code === 'BOARD_CAPACITY_REACHED') {
+        setPlacementError('Your Study Board already has the maximum of 100 items.');
+      } else if (error instanceof ApiError && error.code === 'BOARD_ITEM_ALREADY_PLACED') {
+        try {
+          const board = await fetchBoard();
+          setBoardItems(board.items);
+        } catch {
+          setPlacementError('This item is already on your board. Refresh to update its status.');
+        }
+      } else {
+        setPlacementError(`Could not add ${item.displayName} to your board. Please try again.`);
+      }
+    } finally {
+      setPlacingItemId(null);
+    }
+  };
+
+  const placedRewardIds = new Set(boardItems.flatMap((item) => (
+    item.source === 'reward' ? [item.hourRewardId] : []
+  )));
+  const placedShopItemIds = new Set(boardItems.flatMap((item) => (
+    item.source === 'shop' ? [item.ownedItemId] : []
+  )));
 
   return (
     <div className="space-y-8 pb-10">
@@ -238,9 +279,30 @@ export default function Inventory() {
                       Item #{item.ownedItemId}
                     </span>
                     <span className="mt-2 text-[10px] text-slate-600">Acquired {formatEarnedAt(item.acquiredAt)}</span>
-                    <div className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-xs font-semibold text-slate-500" aria-disabled="true">
-                      <Clock3 className="h-3.5 w-3.5" /> Board support coming next
-                    </div>
+                    {item.itemType === 'sticky_note' || item.itemType === 'decoration' ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleAddShopItemToBoard(item)}
+                        disabled={placedShopItemIds.has(item.ownedItemId) || placingItemId !== null}
+                        className={`mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-default ${
+                          placedShopItemIds.has(item.ownedItemId)
+                            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                            : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:border-indigo-400/60 hover:bg-indigo-500/20 disabled:opacity-50'
+                        }`}
+                      >
+                        {placedShopItemIds.has(item.ownedItemId) ? (
+                          <><Check className="h-3.5 w-3.5" /> On Board</>
+                        ) : placingItemId === `shop:${item.ownedItemId}` ? (
+                          <><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Adding…</>
+                        ) : (
+                          <><Plus className="h-3.5 w-3.5" /> Add to Board</>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-xs font-semibold text-slate-500" aria-disabled="true">
+                        <Clock3 className="h-3.5 w-3.5" /> Board support coming next
+                      </div>
+                    )}
                   </motion.article>
                 ))}
               </motion.div>
@@ -286,16 +348,16 @@ export default function Inventory() {
                 <button
                   type="button"
                   onClick={() => void handleAddToBoard(item)}
-                  disabled={placedItemIds.has(item.hourRewardId) || placingItemId !== null}
+                  disabled={placedRewardIds.has(item.hourRewardId) || placingItemId !== null}
                   className={`mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-default ${
-                    placedItemIds.has(item.hourRewardId)
+                    placedRewardIds.has(item.hourRewardId)
                       ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
                       : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:border-indigo-400/60 hover:bg-indigo-500/20 disabled:opacity-50'
                   }`}
                 >
-                  {placedItemIds.has(item.hourRewardId) ? (
+                  {placedRewardIds.has(item.hourRewardId) ? (
                     <><Check className="h-3.5 w-3.5" /> On Board</>
-                  ) : placingItemId === item.hourRewardId ? (
+                  ) : placingItemId === `reward:${item.hourRewardId}` ? (
                     <><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Adding…</>
                   ) : (
                     <><Plus className="h-3.5 w-3.5" /> Add to Board</>

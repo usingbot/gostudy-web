@@ -22,7 +22,45 @@ export interface DashboardData {
 
 export interface InventoryPage {
   items: InventoryItem[];
+  shopItems: ShopInventoryItem[];
   nextCursor: string | null;
+}
+
+export type BoardShopItemType = 'decoration' | 'sticky_note' | 'gif' | 'photo_frame';
+
+export interface ShopInventoryItem {
+  source: 'shop';
+  ownedItemId: string;
+  itemKey: string;
+  displayName: string;
+  itemType: BoardShopItemType;
+  acquiredAt: string;
+}
+
+export interface BoardShopCatalogItem {
+  itemKey: string;
+  displayName: string;
+  itemType: BoardShopItemType;
+  priceChalk: string;
+  enabled: boolean;
+}
+
+export interface BoardShopData {
+  chalkBalance: string;
+  items: BoardShopCatalogItem[];
+}
+
+export interface BoardShopPurchaseResult {
+  purchaseId: string;
+  userId: string;
+  itemKey: string;
+  displayName: string;
+  itemType: BoardShopItemType;
+  priceChalk: string;
+  ownedItemId: string;
+  chalkTransactionId: string;
+  chalkBalance: string;
+  replayed: boolean;
 }
 
 export interface CatalogItem {

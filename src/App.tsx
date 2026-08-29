@@ -9,6 +9,7 @@ import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
+import Shop from './pages/Shop';
 import StudyBoard from './pages/StudyBoard';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
@@ -28,6 +29,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/inventory" element={<Inventory />} />
+            <Route path="/shop" element={<Shop />} />
             <Route path="/board" element={<StudyBoard />} />
             <Route path="/settings" element={<Settings />} />
             <Route element={<RequireAdmin />}>

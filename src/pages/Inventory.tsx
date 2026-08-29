@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {Backpack, Check, LoaderCircle, Plus} from 'lucide-react';
+import {Backpack, Check, Clock3, LoaderCircle, Plus} from 'lucide-react';
 import {motion} from 'motion/react';
 
 import {addBoardItem, fetchBoard} from '../api/board';
@@ -10,8 +10,8 @@ import {
   markRewardsSeen,
 } from '../api/productData';
 import {useAuth} from '../auth/AuthProvider';
-import {renderRewardAsset} from '../components/IconMap';
-import type {BoardItem, BoardPosition, InventoryItem} from '../types';
+import {renderRewardAsset, renderShopItem} from '../components/IconMap';
+import type {BoardItem, BoardPosition, InventoryItem, ShopInventoryItem} from '../types';
 
 const PAGE_SIZE = 20;
 
@@ -39,6 +39,7 @@ function findFirstFreePosition(boardItems: BoardItem[]): BoardPosition | null {
 export default function Inventory() {
   const {refresh} = useAuth();
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [shopItems, setShopItems] = useState<ShopInventoryItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -60,6 +61,7 @@ export default function Inventory() {
     ])
       .then(([page, board]) => {
         setItems(page.items);
+        setShopItems(page.shopItems);
         setNextCursor(page.nextCursor);
         setBoardItems(board.items);
         const newRewardIds = getNewRewardIds(page.items);
@@ -174,7 +176,7 @@ export default function Inventory() {
         </div>
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-50">Your Inventory</h1>
-          <p className="text-slate-400 text-sm">Every item instance earned from your verified study sessions.</p>
+          <p className="text-slate-400 text-sm">Every item instance earned from study or purchased with Chalk.</p>
         </div>
       </div>
 
@@ -193,28 +195,80 @@ export default function Inventory() {
         <div className="rounded-2xl border border-slate-800 bg-[#18181b] p-10 text-center text-slate-400">
           Loading your inventory…
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && shopItems.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-800 bg-[#18181b] p-12 text-center">
           <Backpack className="mx-auto mb-4 h-10 w-10 text-slate-600" />
           <h2 className="font-semibold text-slate-200">Your inventory is empty</h2>
-          <p className="mt-2 text-sm text-slate-500">Complete a verified study hour to earn your first item.</p>
+          <p className="mt-2 text-sm text-slate-500">Complete a verified study hour or visit the Shop to get your first item.</p>
         </div>
       ) : (
         <>
-          <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4"
-          >
-            {items.map((item, index) => (
+          {shopItems.length > 0 && (
+            <section aria-labelledby="purchased-items-heading">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                  <h2 id="purchased-items-heading" className="font-bold text-slate-100">Purchased board items</h2>
+                  <p className="text-xs text-slate-500">Independent instances purchased from the Board Shop.</p>
+                </div>
+                <span className="rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">
+                  {shopItems.length} owned
+                </span>
+              </div>
               <motion.div
-                initial={{opacity: 0, y: 10}}
-                animate={{opacity: 1, y: 0}}
-                transition={{delay: Math.min(index, PAGE_SIZE) * 0.03}}
-                key={item.hourRewardId}
-                title={item.description ?? item.displayName}
-                className="group relative bg-[#18181b] border border-slate-800 rounded-2xl p-4 flex flex-col items-center text-center hover:border-indigo-500/50 hover:bg-slate-900/50 transition-all"
+                initial={{opacity: 0}}
+                animate={{opacity: 1}}
+                className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5"
               >
+                {shopItems.map((item, index) => (
+                  <motion.article
+                    key={`shop:${item.ownedItemId}`}
+                    initial={{opacity: 0, y: 10}}
+                    animate={{opacity: 1, y: 0}}
+                    transition={{delay: Math.min(index, PAGE_SIZE) * 0.03}}
+                    className="group relative flex flex-col items-center rounded-2xl border border-indigo-500/20 bg-[#18181b] p-4 text-center transition-all hover:border-indigo-500/50 hover:bg-slate-900/50"
+                  >
+                    <span className="absolute right-3 top-3 rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                      Shop
+                    </span>
+                    <div className="mb-4 mt-2 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-300 transition-transform group-hover:scale-110">
+                      {renderShopItem(item.itemType, 'h-8 w-8')}
+                    </div>
+                    <h3 className="mb-1 text-sm font-semibold text-slate-100">{item.displayName}</h3>
+                    <span className="mt-1 rounded-md border border-slate-800 bg-slate-900 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Item #{item.ownedItemId}
+                    </span>
+                    <span className="mt-2 text-[10px] text-slate-600">Acquired {formatEarnedAt(item.acquiredAt)}</span>
+                    <div className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-xs font-semibold text-slate-500" aria-disabled="true">
+                      <Clock3 className="h-3.5 w-3.5" /> Board support coming next
+                    </div>
+                  </motion.article>
+                ))}
+              </motion.div>
+            </section>
+          )}
+
+          {items.length > 0 && (
+            <section aria-labelledby="reward-items-heading">
+              <div className={shopItems.length > 0 ? 'mb-4' : 'sr-only'}>
+                <h2 id="reward-items-heading" className="font-bold text-slate-100">Study rewards</h2>
+                {shopItems.length > 0 && (
+                  <p className="text-xs text-slate-500">Legacy reward instances earned from verified study sessions.</p>
+                )}
+              </div>
+              <motion.div
+                initial={{opacity: 0}}
+                animate={{opacity: 1}}
+                className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4"
+              >
+                {items.map((item, index) => (
+                  <motion.div
+                    initial={{opacity: 0, y: 10}}
+                    animate={{opacity: 1, y: 0}}
+                    transition={{delay: Math.min(index, PAGE_SIZE) * 0.03}}
+                    key={item.hourRewardId}
+                    title={item.description ?? item.displayName}
+                    className="group relative bg-[#18181b] border border-slate-800 rounded-2xl p-4 flex flex-col items-center text-center hover:border-indigo-500/50 hover:bg-slate-900/50 transition-all"
+                  >
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 {item.isNew && (
                   <span className="absolute right-3 top-3 rounded-full border border-indigo-400/30 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-300">
@@ -247,9 +301,11 @@ export default function Inventory() {
                     <><Plus className="h-3.5 w-3.5" /> Add to Board</>
                   )}
                 </button>
+                  </motion.div>
+                ))}
               </motion.div>
-            ))}
-          </motion.div>
+            </section>
+          )}
 
           {loadFailed && (
             <p className="text-center text-sm text-red-400">The next page could not be loaded. Please try again.</p>

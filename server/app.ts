@@ -66,18 +66,25 @@ import {
   RewardSeenOwnershipError,
   RewardSeenValidationError,
 } from './reward-seen.js';
+import {
+  getBoardShop,
+  getOwnedShopItems,
+  purchaseBoardShopItem,
+} from './shop-data.js';
+import {parseShopPurchaseBody, ShopValidationError} from './shop-validation.js';
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
 const DEFAULT_RETURN_TO = '/dashboard';
 const ALLOWED_RETURN_TO = new Set([
   '/dashboard',
   '/inventory',
+  '/shop',
   '/board',
   '/settings',
   '/admin',
 ] as const);
 
-type AllowedReturnTo = '/dashboard' | '/inventory' | '/board' | '/settings' | '/admin';
+type AllowedReturnTo = '/dashboard' | '/inventory' | '/shop' | '/board' | '/settings' | '/admin';
 
 export interface CreateAppOptions {
   sessionStore?: session.Store;
@@ -226,6 +233,10 @@ export function createApp(
     next();
   }, requireDataAuthentication);
   app.use('/api/rewards', express.json({limit: '16kb', strict: true}));
+  app.use('/api/shop', (_request, response, next) => {
+    response.set('Cache-Control', 'private, no-store');
+    next();
+  }, requireDataAuthentication);
 
   const adminJsonParser = express.json({limit: '16kb', strict: true});
   const adminMutationRateLimiter = createActorRateLimiter();
@@ -457,7 +468,11 @@ export function createApp(
 
     try {
       const pagination = parseInventoryPagination(request.query);
-      response.json(await getInventoryPage(pool, discordUserId, pagination));
+      const [page, shopItems] = await Promise.all([
+        getInventoryPage(pool, discordUserId, pagination),
+        pagination.cursor === null ? getOwnedShopItems(pool, discordUserId) : Promise.resolve([]),
+      ]);
+      response.json({...page, shopItems});
     } catch (error) {
       if (error instanceof PaginationValidationError) {
         response.status(400).json({error: 'Invalid inventory pagination'});
@@ -466,6 +481,54 @@ export function createApp(
       throw error;
     }
   }));
+
+  app.get('/api/shop', asyncHandler(async (_request, response) => {
+    response.json(await getBoardShop(pool, getAuthenticatedUserId(response)));
+  }));
+
+  app.post(
+    '/api/shop/purchase',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    express.json({limit: '16kb', strict: true}),
+    asyncHandler(async (request, response) => {
+      try {
+        const input = parseShopPurchaseBody(request.body);
+        response.json(await purchaseBoardShopItem(
+          pool,
+          getAuthenticatedUserId(response),
+          input,
+        ));
+      } catch (error) {
+        if (error instanceof ShopValidationError) {
+          response.status(400).json({error: error.code});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === 'GSB01') {
+          response.status(404).json({error: 'ITEM_NOT_FOUND'});
+          return;
+        }
+        if (code === 'GSB02') {
+          response.status(409).json({error: 'ITEM_DISABLED'});
+          return;
+        }
+        if (code === '23514') {
+          response.status(409).json({error: 'INSUFFICIENT_CHALK'});
+          return;
+        }
+        if (code === 'GSB03' || code === '22000') {
+          response.status(409).json({error: 'IDEMPOTENCY_CONFLICT'});
+          return;
+        }
+        if (code === '22023') {
+          response.status(400).json({error: 'INVALID_ITEM'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
 
   app.get('/api/catalog', asyncHandler(async (request, response) => {
     response.set('Cache-Control', 'private, no-store');

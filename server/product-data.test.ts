@@ -263,7 +263,7 @@ test('inventory keyset pages are bounded and return the last visible ID as curso
 test('inventory API scopes data to the session userid and ignores browser userid input', async () => {
   const sessionUserId = '123456789';
   const calls: QueryCall[] = [];
-  const pool = createPool(() => [
+  const pool = createPool((text) => text.includes('web_owned_board_items') ? [] : [
     makeInventoryRow('9223372036854775806'),
     makeInventoryRow('9223372036854775805'),
   ], calls);
@@ -280,6 +280,7 @@ test('inventory API scopes data to the session userid and ignores browser userid
 
     const body = await response.json() as {
       items: Array<{hourRewardId: string; itemKey: string}>;
+      shopItems: unknown[];
       nextCursor: string | null;
     };
     assert.deepEqual(body.items.map((item) => item.hourRewardId), [
@@ -287,6 +288,7 @@ test('inventory API scopes data to the session userid and ignores browser userid
       '9223372036854775805',
     ]);
     assert.deepEqual(body.items.map((item) => item.itemKey), ['coffee', 'coffee']);
+    assert.deepEqual(body.shopItems, []);
     assert.equal(calls[0].values[0], sessionUserId);
     assert.notEqual(calls[0].values[0], '999999999');
   });

@@ -3,22 +3,49 @@ import {LayoutGrid, RefreshCw} from 'lucide-react';
 
 import {
   fetchBoard,
+  isGifSlotObject,
   isStickyNoteObject,
   moveBoardObject,
   removeBoardObject,
   updateStickyNote,
 } from '../api/board';
+import {hydrateGiphyIds, selectBoardGif} from '../api/giphy';
 import {ApiError} from '../api/productData';
 import {useAuth} from '../auth/AuthProvider';
 import StudyBoardCanvas from '../components/StudyBoardCanvas';
 import type {BoardItemSaveState} from '../components/BoardItem';
+import GifPicker from '../components/GifPicker';
 import StickyNoteEditor from '../components/StickyNoteEditor';
-import type {BoardObject, BoardPosition} from '../types';
+import type {BoardGif, BoardObject, BoardPosition, ResolvedBoardGif} from '../types';
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = {...record};
   delete next[key];
   return next;
+}
+
+function mergeHydratedGifs(
+  items: BoardObject[],
+  hydrated: ReadonlyMap<string, BoardGif>,
+  targetIds?: ReadonlySet<string>,
+): BoardObject[] {
+  return items.map((item) => {
+    if (!isGifSlotObject(item)
+      || !item.gif
+      || (targetIds && !targetIds.has(item.gif.giphyId))) {
+      return item;
+    }
+    const current = hydrated.get(item.gif.giphyId);
+    return {
+      ...item,
+      gif: current ?? {
+        ...item.gif,
+        title: item.gif.title || 'GIF',
+        media: null,
+        hydrationState: 'unavailable',
+      },
+    };
+  });
 }
 
 export default function StudyBoard() {
@@ -30,6 +57,7 @@ export default function StudyBoard() {
   const [saveStates, setSaveStates] = useState<Record<string, BoardItemSaveState>>({});
   const [requestVersion, setRequestVersion] = useState(0);
   const [editingOwnedItemId, setEditingOwnedItemId] = useState<string | null>(null);
+  const [editingGifOwnedItemId, setEditingGifOwnedItemId] = useState<string | null>(null);
   const confirmedPositionsRef = useRef(new Map<string, BoardPosition>());
   const pendingPositionsRef = useRef(new Map<string, BoardPosition>());
   const savingIdsRef = useRef(new Set<string>());
@@ -56,6 +84,32 @@ export default function StudyBoard() {
         pendingPositionsRef.current.clear();
         savingIdsRef.current.clear();
         setSaveStates({});
+
+        const giphyIds = board.items.flatMap((item) => isGifSlotObject(item) && item.gif
+          ? [item.gif.giphyId]
+          : []);
+        if (giphyIds.length > 0) {
+          const requestedIds = new Set(giphyIds);
+          void hydrateGiphyIds(giphyIds, controller.signal)
+            .then((hydrated) => {
+              if (!controller.signal.aborted) {
+                setItems((currentItems) => mergeHydratedGifs(
+                  currentItems,
+                  hydrated,
+                  requestedIds,
+                ));
+              }
+            })
+            .catch(() => {
+              if (!controller.signal.aborted) {
+                setItems((currentItems) => mergeHydratedGifs(
+                  currentItems,
+                  new Map(),
+                  requestedIds,
+                ));
+              }
+            });
+        }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
@@ -175,6 +229,9 @@ export default function StudyBoard() {
   const editingNote = items.find((item) => (
     isStickyNoteObject(item) && item.ownedItemId === editingOwnedItemId
   ));
+  const editingGifSlot = items.find((item) => (
+    isGifSlotObject(item) && item.ownedItemId === editingGifOwnedItemId
+  ));
 
   const handleSaveStickyNote = useCallback(async (ownedItemId: string, body: string) => {
     try {
@@ -193,6 +250,60 @@ export default function StudyBoard() {
       throw error;
     }
   }, [refresh]);
+
+  const handleSaveGif = useCallback(async (
+    ownedItemId: string,
+    gif: ResolvedBoardGif,
+  ): Promise<void> => {
+    try {
+      const saved = await selectBoardGif(ownedItemId, gif.giphyId);
+      if (mountedRef.current) {
+        setItems((currentItems) => currentItems.map((item) => (
+          isGifSlotObject(item) && item.ownedItemId === saved.ownedItemId
+            ? {...item, gif}
+            : item
+        )));
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        void refresh();
+      }
+      throw error;
+    }
+  }, [refresh]);
+
+  const handleRetryGif = useCallback(async (ownedItemId: string) => {
+    const slot = items.find((item) => isGifSlotObject(item)
+      && item.ownedItemId === ownedItemId
+      && item.gif);
+    if (!slot || !isGifSlotObject(slot) || !slot.gif) {
+      return;
+    }
+    const {giphyId} = slot.gif;
+    setItems((currentItems) => currentItems.map((item) => isGifSlotObject(item)
+      && item.ownedItemId === ownedItemId
+      && item.gif
+      ? {...item, gif: {...item.gif, hydrationState: 'loading'}}
+      : item));
+    try {
+      const hydrated = await hydrateGiphyIds([giphyId]);
+      if (mountedRef.current) {
+        setItems((currentItems) => currentItems.map((item) => isGifSlotObject(item)
+          && item.ownedItemId === ownedItemId
+          && item.gif?.giphyId === giphyId
+          ? mergeHydratedGifs([item], hydrated, new Set([giphyId]))[0]
+          : item));
+      }
+    } catch {
+      if (mountedRef.current) {
+        setItems((currentItems) => currentItems.map((item) => isGifSlotObject(item)
+          && item.ownedItemId === ownedItemId
+          && item.gif?.giphyId === giphyId
+          ? mergeHydratedGifs([item], new Map(), new Set([giphyId]))[0]
+          : item));
+      }
+    }
+  }, [items]);
 
   return (
     <div className="space-y-6 pb-10">
@@ -245,6 +356,8 @@ export default function StudyBoard() {
           onRetry={handleRetry}
           onRollback={handleRollback}
           onEditStickyNote={setEditingOwnedItemId}
+          onEditGif={setEditingGifOwnedItemId}
+          onRetryGif={(ownedItemId) => void handleRetryGif(ownedItemId)}
         />
       )}
 
@@ -253,6 +366,14 @@ export default function StudyBoard() {
           note={editingNote}
           onClose={() => setEditingOwnedItemId(null)}
           onSave={(body) => handleSaveStickyNote(editingNote.ownedItemId, body)}
+        />
+      )}
+
+      {editingGifSlot && isGifSlotObject(editingGifSlot) && (
+        <GifPicker
+          slot={editingGifSlot}
+          onClose={() => setEditingGifOwnedItemId(null)}
+          onSave={(gif) => handleSaveGif(editingGifSlot.ownedItemId, gif)}
         />
       )}
 

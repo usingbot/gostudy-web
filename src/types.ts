@@ -92,6 +92,7 @@ export interface ShopBoardObject extends BoardObjectBase {
   displayName: string;
   itemType: BoardShopItemType;
   body?: string;
+  gif?: BoardGif | null;
 }
 
 export type BoardObject = RewardBoardObject | ShopBoardObject;
@@ -103,6 +104,36 @@ export interface BoardPositionResult extends BoardPosition {
 export interface StickyNoteContent {
   ownedItemId: string;
   body: string;
+}
+
+export interface BoardGif {
+  giphyId: string;
+  title: string;
+  media: BoardGifMedia | null;
+  hydrationState: 'loading' | 'ready' | 'unavailable';
+}
+
+export interface BoardGifMedia {
+  previewUrl: string | null;
+  renderUrl: string;
+  width: number;
+  height: number;
+}
+
+export interface ResolvedBoardGif extends BoardGif {
+  media: BoardGifMedia;
+  hydrationState: 'ready';
+}
+
+export interface BoardGifSelection {
+  ownedItemId: string;
+  giphyId: string;
+}
+
+export interface GiphySearchPage {
+  items: BoardGif[];
+  offset: number;
+  nextOffset: number | null;
 }
 
 export interface BoardData {

@@ -13,6 +13,14 @@ interface ErrorResponse {
   code?: unknown;
 }
 
+type ShopBoardObjectResponse = Omit<ShopBoardObject, 'gif'> & {
+  gif?: {giphyId: string} | null;
+};
+
+interface BoardDataResponse {
+  items: Array<RewardBoardObject | ShopBoardObjectResponse>;
+}
+
 async function readApiError(response: Response): Promise<ApiError> {
   let code: string | undefined;
   try {
@@ -41,8 +49,23 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   return response.json() as Promise<T>;
 }
 
-export function fetchBoard(signal?: AbortSignal): Promise<BoardData> {
-  return requestJson('/api/board', {signal});
+export async function fetchBoard(signal?: AbortSignal): Promise<BoardData> {
+  const board = await requestJson<BoardDataResponse>('/api/board', {signal});
+  return {
+    items: board.items.map((item): BoardObject => item.source === 'shop'
+      && item.itemType === 'gif'
+      && item.gif
+      ? {
+          ...item,
+          gif: {
+            giphyId: item.gif.giphyId,
+            title: 'GIF',
+            media: null,
+            hydrationState: 'loading',
+          },
+        }
+      : item as BoardObject),
+  };
 }
 
 export function addBoardItem(
@@ -107,4 +130,11 @@ export function isStickyNoteObject(item: BoardObject): item is ShopBoardObject &
   return item.source === 'shop'
     && item.itemType === 'sticky_note'
     && typeof item.body === 'string';
+}
+
+export function isGifSlotObject(item: BoardObject): item is ShopBoardObject & {
+  itemType: 'gif';
+  gif: ShopBoardObject['gif'];
+} {
+  return item.source === 'shop' && item.itemType === 'gif';
 }

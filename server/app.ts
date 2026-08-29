@@ -38,6 +38,7 @@ import {
   parseUserSearchQuery,
 } from './admin-validation.js';
 import {
+  assertGifSlotOwned,
   BoardCapacityError,
   BoardItemAlreadyPlacedError,
   BoardItemNotFoundError,
@@ -54,11 +55,13 @@ import {
   parseBoardItemId,
   parseBoardPlacementBody,
   parseBoardPositionBody,
+  parseGiphySelectionBody,
   parseOwnedItemId,
   parseShopBoardPlacementBody,
   parseStickyNoteBody,
   updateBoardObject,
   updateBoardItem,
+  updateBoardGif,
   updateStickyNote,
 } from './board-data.js';
 import {createDiscordAuthorizationUrl, exchangeCodeForDiscordUser} from './discord.js';
@@ -205,7 +208,14 @@ export function createApp(
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
-        imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com'],
+        imgSrc: [
+          "'self'",
+          'data:',
+          'https://cdn.discordapp.com',
+          'https://giphy.com',
+          'https://*.giphy.com',
+        ],
+        connectSrc: ["'self'", 'https://api.giphy.com'],
       },
     },
   }));
@@ -732,6 +742,51 @@ export function createApp(
         }
         if (code === '22023' || code === '23514') {
           response.status(400).json({error: 'Invalid Sticky Note body'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.put(
+    '/api/board/gifs/:ownedItemId',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    asyncHandler(async (request, response) => {
+      try {
+        const ownedItemId = parseOwnedItemId(request.params.ownedItemId);
+        const giphyId = parseGiphySelectionBody(request.body);
+        const discordUserId = getAuthenticatedUserId(response);
+
+        // The database function repeats this ownership/type check during
+        // persistence. GIPHY existence is resolved directly by the browser.
+        await assertGifSlotOwned(pool, discordUserId, ownedItemId);
+        response.json(await updateBoardGif(pool, discordUserId, ownedItemId, giphyId));
+      } catch (error) {
+        if (error instanceof BoardValidationError) {
+          response.status(400).json({error: 'Invalid GIF selection', code: 'INVALID_GIF_SELECTION'});
+          return;
+        }
+        if (error instanceof BoardItemNotOwnedError) {
+          response.status(404).json({error: 'GIF Slot not found', code: 'GIF_SLOT_NOT_FOUND'});
+          return;
+        }
+        if (error instanceof BoardItemUnsupportedError) {
+          response.status(409).json({error: 'Owned item is not a GIF Slot', code: 'BOARD_ITEM_NOT_GIF_SLOT'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === 'GSB04') {
+          response.status(404).json({error: 'GIF Slot not found', code: 'GIF_SLOT_NOT_FOUND'});
+          return;
+        }
+        if (code === 'GSB05') {
+          response.status(409).json({error: 'Owned item is not a GIF Slot', code: 'BOARD_ITEM_NOT_GIF_SLOT'});
+          return;
+        }
+        if (code === '22023' || code === '23514') {
+          response.status(400).json({error: 'Invalid GIF selection', code: 'INVALID_GIF_SELECTION'});
           return;
         }
         throw error;

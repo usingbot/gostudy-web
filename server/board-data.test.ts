@@ -25,6 +25,8 @@ import {
   parseBoardObjectId,
   parseBoardPlacementBody,
   parseBoardPositionBody,
+  parseGiphyId,
+  parseGiphySelectionBody,
   parseOwnedItemId,
   parseShopBoardPlacementBody,
   parseStickyNoteBody,
@@ -112,11 +114,12 @@ function makeRewardRow(
     shop_display_name: null,
     shop_item_type: null,
     sticky_body: null,
+    gif_giphy_id: null,
   };
 }
 
 function makeShopRow(
-  itemType: 'sticky_note' | 'decoration' = 'sticky_note',
+  itemType: 'sticky_note' | 'decoration' | 'gif' | 'photo_frame' = 'sticky_note',
   ownedItemId = '9223372036854775805',
   boardObjectId = '9223372036854775804',
   body = 'Review chapter four',
@@ -137,10 +140,23 @@ function makeShopRow(
     reward_description: null,
     reward_asset_key: null,
     reward_metadata: null,
-    shop_item_key: itemType === 'sticky_note' ? 'sticky-note' : 'basic-decoration',
-    shop_display_name: itemType === 'sticky_note' ? 'Sticky Note' : 'Basic Decoration',
+    shop_item_key: itemType === 'sticky_note'
+      ? 'sticky-note'
+      : itemType === 'decoration'
+        ? 'basic-decoration'
+        : itemType === 'gif'
+          ? 'gif-slot'
+          : 'photo-frame',
+    shop_display_name: itemType === 'sticky_note'
+      ? 'Sticky Note'
+      : itemType === 'decoration'
+        ? 'Basic Decoration'
+        : itemType === 'gif'
+          ? 'GIF Slot'
+          : 'Photo Frame',
     shop_item_type: itemType,
     sticky_body: itemType === 'sticky_note' ? body : '',
+    gif_giphy_id: null,
   };
 }
 
@@ -207,7 +223,7 @@ function rewardPlacementHandler(row = makeRewardRow()): QueryHandler {
 
 function shopPlacementHandler(
   itemType: 'sticky_note' | 'decoration' | 'gif' | 'photo_frame',
-  row = makeShopRow(itemType === 'decoration' ? 'decoration' : 'sticky_note'),
+  row = makeShopRow(itemType),
 ): QueryHandler {
   return (text) => {
     if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return [];
@@ -284,6 +300,43 @@ test('GET returns reward and Sticky Note objects as an exact-ID discriminated un
   assert.match(calls[0].text, /web_sticky_notes/);
 });
 
+test('GET returns persisted GIF identity and an unconfigured GIF Slot as null', async () => {
+  const configured = {
+    ...makeShopRow('gif', '70', '80'),
+    gif_giphy_id: 'focus123',
+  };
+  const items = await getBoardItems(
+    createPool(() => [configured, makeShopRow('gif', '71', '81')]),
+    '123456789',
+  );
+  assert.deepEqual(items[0], {
+    boardObjectId: '80',
+    source: 'shop',
+    ownedItemId: '70',
+    itemKey: 'gif-slot',
+    displayName: 'GIF Slot',
+    itemType: 'gif',
+    gif: {
+      giphyId: 'focus123',
+    },
+    x: 0.7,
+    y: 0.2,
+  });
+  assert.equal(items[1].source === 'shop' ? items[1].gif : undefined, null);
+});
+
+test('GIPHY selection validation accepts only one canonical ID field', () => {
+  assert.equal(parseGiphyId('xT4uQ_abc-123'), 'xT4uQ_abc-123');
+  assert.equal(parseGiphySelectionBody({giphyId: 'focus123'}), 'focus123');
+  for (const value of ['', 'has space', '../path', 'x'.repeat(129), 123]) {
+    assert.throws(() => parseGiphyId(value), BoardValidationError);
+  }
+  assert.throws(
+    () => parseGiphySelectionBody({giphyId: 'focus123', renderUrl: 'https://evil.invalid'}),
+    BoardValidationError,
+  );
+});
+
 test('legacy reward placement stays transactional, ownership-checked, and BIGINT-exact', async () => {
   const calls: QueryCall[] = [];
   let released = false;
@@ -336,19 +389,27 @@ test('foreign owned item is rejected before any board write', async () => {
   assert(!calls.some((call) => call.text.includes('INSERT INTO public.web_study_boards')));
 });
 
-test('GIF Slot and Photo Frame remain owned but unplaceable', async () => {
-  for (const itemType of ['gif', 'photo_frame'] as const) {
-    const calls: QueryCall[] = [];
-    await assert.rejects(
-      createShopBoardItem(
-        createPool(() => [], shopPlacementHandler(itemType), calls),
-        '123456789',
-        {ownedItemId: '55', x: 0.5, y: 0.5},
-      ),
-      BoardItemUnsupportedError,
-    );
-    assert(!calls.some((call) => call.text.includes('web_study_board_objects') && call.text.includes('INSERT')));
-  }
+test('GIF Slot is placeable before a GIF is selected', async () => {
+  const item = await createShopBoardItem(
+    createPool(() => [], shopPlacementHandler('gif')),
+    '123456789',
+    {ownedItemId: '55', x: 0.5, y: 0.5},
+  );
+  assert.equal(item.itemType, 'gif');
+  assert.equal(item.gif, null);
+});
+
+test('Photo Frame remains owned but unplaceable', async () => {
+  const calls: QueryCall[] = [];
+  await assert.rejects(
+    createShopBoardItem(
+      createPool(() => [], shopPlacementHandler('photo_frame'), calls),
+      '123456789',
+      {ownedItemId: '55', x: 0.5, y: 0.5},
+    ),
+    BoardItemUnsupportedError,
+  );
+  assert(!calls.some((call) => call.text.includes('web_study_board_objects') && call.text.includes('INSERT')));
 });
 
 test('strict placement bodies never accept forged userid or object type', () => {

@@ -12,6 +12,8 @@ interface StudyBoardCanvasProps {
   onRetry: (boardObjectId: string) => void;
   onRollback: (boardObjectId: string) => void;
   onEditStickyNote: (ownedItemId: string) => void;
+  onEditGif: (ownedItemId: string) => void;
+  onRetryGif: (ownedItemId: string) => void;
 }
 
 export default function StudyBoardCanvas({
@@ -23,6 +25,8 @@ export default function StudyBoardCanvas({
   onRetry,
   onRollback,
   onEditStickyNote,
+  onEditGif,
+  onRetryGif,
 }: StudyBoardCanvasProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const [boardSize, setBoardSize] = useState({width: 0, height: 0});
@@ -44,6 +48,7 @@ export default function StudyBoardCanvas({
 
   const rewardItemSize = Math.max(48, Math.min(86, boardSize.width * 0.105));
   const stickyNoteSize = Math.max(72, Math.min(124, boardSize.width * 0.15));
+  const gifSlotSize = Math.max(92, Math.min(154, boardSize.width * 0.18));
 
   return (
     <div className="rounded-3xl border border-slate-700/80 bg-[#111113] p-3 shadow-2xl shadow-black/30 sm:p-5">
@@ -80,7 +85,9 @@ export default function StudyBoardCanvas({
             boardSize={boardSize}
             itemSize={item.source === 'shop' && item.itemType === 'sticky_note'
               ? stickyNoteSize
-              : rewardItemSize}
+              : item.source === 'shop' && item.itemType === 'gif'
+                ? gifSlotSize
+                : rewardItemSize}
             saveState={saveStates[item.boardObjectId] ?? 'idle'}
             onPositionChange={onPositionChange}
             onPositionCommit={onPositionCommit}
@@ -88,6 +95,8 @@ export default function StudyBoardCanvas({
             onRetry={onRetry}
             onRollback={onRollback}
             onEditStickyNote={onEditStickyNote}
+            onEditGif={onEditGif}
+            onRetryGif={onRetryGif}
           />
         ))}
       </div>

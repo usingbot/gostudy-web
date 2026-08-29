@@ -27,6 +27,7 @@ interface BoardObjectRow extends QueryResultRow {
   shop_display_name: string | null;
   shop_item_type: string | null;
   sticky_body: string | null;
+  gif_giphy_id: string | null;
 }
 
 interface CountRow extends QueryResultRow {
@@ -48,6 +49,11 @@ interface BoardPositionRow extends QueryResultRow {
 interface StickyNoteRow extends QueryResultRow {
   owned_itemid: string | number;
   body: string;
+}
+
+interface BoardGifRow extends QueryResultRow {
+  owned_itemid: string | number;
+  giphy_id: string;
 }
 
 export interface BoardPosition {
@@ -87,6 +93,7 @@ export interface ShopBoardObject extends BoardObjectBase {
   displayName: string;
   itemType: ShopObjectType;
   body?: string;
+  gif?: BoardGif | null;
 }
 
 export type BoardObject = RewardBoardObject | ShopBoardObject;
@@ -98,6 +105,14 @@ export interface BoardPositionResult extends BoardPosition {
 export interface StickyNoteContent {
   ownedItemId: string;
   body: string;
+}
+
+export interface BoardGif {
+  giphyId: string;
+}
+
+export interface BoardGifSelection extends BoardGif {
+  ownedItemId: string;
 }
 
 export class BoardValidationError extends Error {}
@@ -140,6 +155,24 @@ export function parseBoardObjectId(value: unknown): string {
 
 export function parseOwnedItemId(value: unknown): string {
   return parseBigintId(value, 'ownedItemId');
+}
+
+export function parseGiphyId(value: unknown): string {
+  if (typeof value !== 'string'
+    || value.length < 1
+    || value.length > 128
+    || !/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new BoardValidationError('giphyId was invalid');
+  }
+  return value;
+}
+
+export function parseGiphySelectionBody(value: unknown): string {
+  if (!isRecord(value)) {
+    throw new BoardValidationError('Request body must be a JSON object');
+  }
+  assertNoUnknownProperties(value, new Set(['giphyId']));
+  return parseGiphyId(value.giphyId);
 }
 
 function parseCoordinate(value: unknown, fieldName: string): number {
@@ -226,6 +259,14 @@ function parseSafeNonNegativeInteger(value: string | number, fieldName: string):
   return parsed;
 }
 
+function parseSafePositiveInteger(value: string | number, fieldName: string): number {
+  const parsed = parseSafeNonNegativeInteger(value, fieldName);
+  if (parsed === 0) {
+    throw new Error(`${fieldName} must be positive`);
+  }
+  return parsed;
+}
+
 function parseTimestamp(value: Date | string, fieldName: string): string {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.valueOf())) {
@@ -255,6 +296,13 @@ function isShopObjectType(value: string): value is ShopObjectType {
     || value === 'sticky_note'
     || value === 'gif'
     || value === 'photo_frame';
+}
+
+function mapStoredGif(row: BoardObjectRow): BoardGif | null {
+  if (row.gif_giphy_id === null) {
+    return null;
+  }
+  return {giphyId: row.gif_giphy_id};
 }
 
 function mapBoardObjectRow(row: BoardObjectRow): BoardObject {
@@ -303,6 +351,7 @@ function mapBoardObjectRow(row: BoardObjectRow): BoardObject {
       displayName: row.shop_display_name,
       itemType: row.object_type,
       ...(row.object_type === 'sticky_note' ? {body: row.sticky_body ?? ''} : {}),
+      ...(row.object_type === 'gif' ? {gif: mapStoredGif(row)} : {}),
     };
   }
   throw new Error('Stored board source type was invalid');
@@ -379,7 +428,8 @@ export async function getBoardItems(pool: Pool, discordUserId: string): Promise<
             shop_catalog.item_key AS shop_item_key,
             shop_catalog.display_name AS shop_display_name,
             shop_catalog.item_type AS shop_item_type,
-            sticky_note.body AS sticky_body
+            sticky_note.body AS sticky_body,
+            board_gif.giphy_id AS gif_giphy_id
        FROM public.web_study_board_objects AS board_object
        LEFT JOIN public.gostudy_user_inventory AS reward_inventory
          ON board_object.source_type = 'reward'
@@ -396,6 +446,9 @@ export async function getBoardItems(pool: Pool, discordUserId: string): Promise<
        LEFT JOIN public.web_sticky_notes AS sticky_note
          ON sticky_note.owned_itemid = owned_item.owned_itemid
         AND sticky_note.userid = board_object.userid
+       LEFT JOIN public.web_board_gifs AS board_gif
+         ON board_gif.owned_itemid = owned_item.owned_itemid
+        AND board_gif.userid = board_object.userid
       WHERE board_object.userid = $1::bigint
         AND (
           (board_object.source_type = 'reward'
@@ -487,7 +540,8 @@ export async function createBoardItem(
               NULL::text AS shop_item_key,
               NULL::text AS shop_display_name,
               NULL::text AS shop_item_type,
-              NULL::text AS sticky_body
+              NULL::text AS sticky_body,
+              NULL::text AS gif_giphy_id
          FROM inserted_object
          JOIN owned_reward USING (hour_rewardid)`,
       [discordUserId, input.hourRewardId, input.x, input.y],
@@ -537,7 +591,7 @@ export async function createShopBoardItem(
       throw new BoardItemNotOwnedError('Owned board item was not found for the current user');
     }
     const itemType = ownership.rows[0].item_type;
-    if (itemType !== 'sticky_note' && itemType !== 'decoration') {
+    if (itemType !== 'sticky_note' && itemType !== 'decoration' && itemType !== 'gif') {
       throw new BoardItemUnsupportedError('Owned board item is not placeable in this chapter');
     }
     const duplicate = await client.query(
@@ -561,7 +615,7 @@ export async function createShopBoardItem(
              ON catalog.item_key = owned.item_key
           WHERE owned.owned_itemid = $2::bigint
             AND owned.userid = $1::bigint
-            AND catalog.item_type IN ('sticky_note', 'decoration')
+            AND catalog.item_type IN ('sticky_note', 'decoration', 'gif')
        ), inserted_object AS (
          INSERT INTO public.web_study_board_objects (
            userid, source_type, owned_itemid, object_type, x, y
@@ -584,12 +638,16 @@ export async function createShopBoardItem(
               owned_shop_item.item_key AS shop_item_key,
               owned_shop_item.display_name AS shop_display_name,
               owned_shop_item.item_type AS shop_item_type,
-              COALESCE(sticky_note.body, '') AS sticky_body
+              COALESCE(sticky_note.body, '') AS sticky_body,
+              board_gif.giphy_id AS gif_giphy_id
          FROM inserted_object
          JOIN owned_shop_item USING (owned_itemid)
          LEFT JOIN public.web_sticky_notes AS sticky_note
            ON sticky_note.owned_itemid = inserted_object.owned_itemid
-          AND sticky_note.userid = $1::bigint`,
+          AND sticky_note.userid = $1::bigint
+         LEFT JOIN public.web_board_gifs AS board_gif
+           ON board_gif.owned_itemid = inserted_object.owned_itemid
+          AND board_gif.userid = $1::bigint`,
       [discordUserId, input.ownedItemId, input.x, input.y],
     );
     if (insertResult.rows.length === 0) {
@@ -730,5 +788,56 @@ export async function updateStickyNote(
   return {
     ownedItemId: parsePositiveBigint(result.rows[0].owned_itemid, 'owned_itemid'),
     body: result.rows[0].body,
+  };
+}
+
+export async function assertGifSlotOwned(
+  pool: Pool,
+  discordUserId: string,
+  ownedItemId: string,
+): Promise<void> {
+  const result = await pool.query<ShopOwnershipRow>(
+    `SELECT owned.item_key, catalog.display_name, catalog.item_type
+       FROM public.web_owned_board_items AS owned
+       JOIN public.web_board_shop_catalog AS catalog
+         ON catalog.item_key = owned.item_key
+      WHERE owned.owned_itemid = $2::bigint
+        AND owned.userid = $1::bigint`,
+    [discordUserId, ownedItemId],
+  );
+  if (result.rows.length === 0) {
+    throw new BoardItemNotOwnedError('GIF Slot was not found for the current user');
+  }
+  if (result.rows[0].item_key !== 'gif-slot' || result.rows[0].item_type !== 'gif') {
+    throw new BoardItemUnsupportedError('Owned item is not a GIF Slot');
+  }
+}
+
+export async function updateBoardGif(
+  pool: Pool,
+  discordUserId: string,
+  ownedItemId: string,
+  giphyId: string,
+): Promise<BoardGifSelection> {
+  const result = await pool.query<BoardGifRow>(
+    `SELECT owned_itemid, giphy_id
+       FROM public.web_upsert_board_gif(
+         $1::bigint,
+         $2::bigint,
+         $3::text
+       )`,
+    [
+      ownedItemId,
+      discordUserId,
+      giphyId,
+    ],
+  );
+  if (result.rows.length !== 1) {
+    throw new Error('Board GIF update returned an invalid row count');
+  }
+  const row = result.rows[0];
+  return {
+    ownedItemId: parsePositiveBigint(row.owned_itemid, 'owned_itemid'),
+    giphyId: row.giphy_id,
   };
 }

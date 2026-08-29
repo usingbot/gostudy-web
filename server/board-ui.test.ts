@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 
-test('Inventory offers supported purchased instances and leaves GIF/photo support pending', async () => {
+test('Inventory offers GIF Slot placement and leaves only Photo Frame pending', async () => {
   const inventory = await readFile('src/pages/Inventory.tsx', 'utf8');
-  assert.match(inventory, /item\.itemType === 'sticky_note' \|\| item\.itemType === 'decoration'/);
+  assert.match(inventory, /item\.itemType !== 'gif'/);
+  assert.match(inventory, /item\.itemType === 'gif'/);
   assert.match(inventory, /addShopBoardItem\(item\.ownedItemId, position\)/);
   assert.match(inventory, /placedShopItemIds\.has\(item\.ownedItemId\)/);
   assert.match(inventory, /<Check[\s\S]*On Board/);
   assert.match(inventory, /<Plus[\s\S]*Add to Board/);
-  assert.match(inventory, /Board support coming next/);
+  assert.match(inventory, /Photo Frame support coming next/);
   assert.match(inventory, /aria-disabled="true"/);
   assert.match(inventory, /placedRewardIds/);
   assert.match(inventory, /addBoardItem\(item\.hourRewardId, position\)/);

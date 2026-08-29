@@ -4,7 +4,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
-import {Pencil, RotateCcw, Trash2} from 'lucide-react';
+import {Film, LoaderCircle, Pencil, RefreshCw, RotateCcw, Trash2} from 'lucide-react';
 
 import {renderRewardAsset, renderShopItem} from './IconMap';
 import type {BoardObject, BoardPosition} from '../types';
@@ -24,6 +24,8 @@ interface BoardItemProps {
   onRetry: (boardObjectId: string) => void;
   onRollback: (boardObjectId: string) => void;
   onEditStickyNote: (ownedItemId: string) => void;
+  onEditGif: (ownedItemId: string) => void;
+  onRetryGif: (ownedItemId: string) => void;
 }
 
 function clamp(value: number): number {
@@ -42,6 +44,8 @@ export default function BoardItem({
   onRetry,
   onRollback,
   onEditStickyNote,
+  onEditGif,
+  onRetryGif,
 }: BoardItemProps) {
   const draggingRef = useRef(false);
   const grabOffsetRef = useRef({x: 0, y: 0});
@@ -148,7 +152,11 @@ export default function BoardItem({
         aria-label={item.source === 'reward'
           ? `Drag ${item.displayName} earned at hour ${item.milestoneHour}`
           : `Drag purchased ${item.displayName}`}
-        title={item.source === 'reward' ? item.description ?? `Drag ${item.displayName}` : `Drag ${item.displayName}`}
+        title={item.source === 'reward'
+          ? item.description ?? `Drag ${item.displayName}`
+          : item.itemType === 'gif' && item.gif
+            ? `Drag ${item.gif.title}`
+            : `Drag ${item.displayName}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}
@@ -156,7 +164,9 @@ export default function BoardItem({
         className={`group h-full w-full cursor-grab touch-none border shadow-xl transition-colors active:cursor-grabbing ${
           item.source === 'shop' && item.itemType === 'sticky_note'
             ? 'rotate-[-1.5deg] rounded-sm border-amber-200/50 bg-[#f3dc82] text-slate-900 shadow-amber-950/25 hover:bg-[#f8e69b]'
-            : 'rounded-2xl bg-[#111827]/95 backdrop-blur-sm'
+            : item.source === 'shop' && item.itemType === 'gif'
+              ? 'overflow-hidden rounded-2xl bg-[#09090b] p-1.5 backdrop-blur-sm'
+              : 'rounded-2xl bg-[#111827]/95 backdrop-blur-sm'
         } ${
           saveState === 'error'
             ? 'border-red-400/70 shadow-red-950/40'
@@ -179,6 +189,58 @@ export default function BoardItem({
               {item.body || 'Click Edit to write a note…'}
             </span>
           </span>
+        ) : item.itemType === 'gif' ? (
+          item.gif ? (
+            <span className="relative block h-full w-full overflow-hidden rounded-xl bg-slate-950">
+              {item.gif.hydrationState === 'loading' ? (
+                <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-center text-slate-400">
+                  <LoaderCircle className="h-[30%] w-[30%] animate-spin" />
+                  <span className="text-[8px] font-bold uppercase tracking-wide">Loading GIF</span>
+                </span>
+              ) : item.gif.media ? (
+                item.gif.media.previewUrl ? (
+                  <picture>
+                    <source
+                      media="(prefers-reduced-motion: reduce)"
+                      srcSet={item.gif.media.previewUrl}
+                    />
+                    <img
+                      src={item.gif.media.renderUrl}
+                      alt={item.gif.title}
+                      draggable={false}
+                      className="h-full w-full object-cover"
+                    />
+                  </picture>
+                ) : (
+                  <>
+                    <img
+                      src={item.gif.media.renderUrl}
+                      alt={item.gif.title}
+                      draggable={false}
+                      className="h-full w-full object-cover motion-reduce:hidden"
+                    />
+                    <span className="hidden h-full w-full flex-col items-center justify-center gap-1 px-2 text-center text-slate-400 motion-reduce:flex">
+                      <Film className="h-[30%] w-[30%]" />
+                      <span className="text-[8px] font-bold uppercase tracking-wide">Animation paused</span>
+                    </span>
+                  </>
+                )
+              ) : (
+                <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-center text-slate-400">
+                  <Film className="h-[30%] w-[30%]" />
+                  <span className="text-[8px] font-bold uppercase tracking-wide">GIF unavailable</span>
+                </span>
+              )}
+              <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-2 py-1 text-left text-[8px] font-semibold text-slate-100 backdrop-blur-sm sm:text-[9px]">
+                {item.gif.title}
+              </span>
+            </span>
+          ) : (
+            <span className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-indigo-400/30 bg-indigo-500/[0.06] text-indigo-200">
+              <Film className="h-[34%] w-[34%]" />
+              <span className="text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">Choose GIF</span>
+            </span>
+          )
         ) : (
           <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-fuchsia-200">
             {renderShopItem(item.itemType, 'h-[42%] w-[42%]')}
@@ -199,6 +261,34 @@ export default function BoardItem({
           className="absolute -bottom-2 -left-2 flex h-7 items-center gap-1 rounded-full border border-amber-200/40 bg-amber-950 px-2 text-[9px] font-bold text-amber-100 opacity-100 shadow-lg transition hover:bg-amber-900 focus:opacity-100 disabled:cursor-wait disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
         >
           <Pencil className="h-3 w-3" /> Edit
+        </button>
+      )}
+
+      {item.source === 'shop' && item.itemType === 'gif' && (
+        <button
+          type="button"
+          aria-label={`${item.gif ? 'Change' : 'Choose'} GIF for ${item.displayName}`}
+          title={item.gif ? 'Change GIF' : 'Choose GIF'}
+          onClick={() => onEditGif(item.ownedItemId)}
+          disabled={saveState === 'removing'}
+          className="absolute -bottom-2 -left-2 flex h-7 items-center gap-1 rounded-full border border-indigo-300/30 bg-indigo-950 px-2 text-[9px] font-bold text-indigo-100 opacity-100 shadow-lg transition hover:bg-indigo-900 focus:opacity-100 disabled:cursor-wait disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
+        >
+          <Film className="h-3 w-3" /> {item.gif ? 'Change' : 'Choose'}
+        </button>
+      )}
+
+      {item.source === 'shop'
+        && item.itemType === 'gif'
+        && item.gif?.hydrationState === 'unavailable' && (
+        <button
+          type="button"
+          aria-label={`Retry GIF for ${item.displayName}`}
+          title="Retry GIF"
+          onClick={() => onRetryGif(item.ownedItemId)}
+          disabled={saveState === 'removing'}
+          className="absolute -bottom-2 left-[4.75rem] flex h-7 items-center gap-1 rounded-full border border-slate-600 bg-slate-950 px-2 text-[9px] font-bold text-slate-200 shadow-lg transition hover:border-indigo-400/60 hover:text-indigo-200 disabled:cursor-wait disabled:opacity-50"
+        >
+          <RefreshCw className="h-3 w-3" /> Retry
         </button>
       )}
 

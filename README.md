@@ -8,7 +8,7 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` and `0006_create_board_objects_v2.sql` require StudyLion schema v20; deploy migration 0006 before deploying an application build that reads generic board objects.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0007_create_board_gifs.sql` require StudyLion schema v20; deploy each migration before its matching application build.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
@@ -36,10 +36,11 @@ The `gostudy_web` role receives only `SELECT` and `INSERT` on `public.web_reward
 
 - `GET /api/board` returns generic board objects as a `source: "reward" | "shop"` discriminated union. Every placement has a string `boardObjectId`; reward and owned-item BIGINT IDs also remain strings.
 - `POST /api/board/items` retains the legacy reward placement body `{hourRewardId,x,y}`.
-- `POST /api/board/owned-items` places one owned Sticky Note or Basic Decoration using the strict body `{ownedItemId,x,y}`. GIF Slot and Photo Frame remain unplaceable.
+- `POST /api/board/owned-items` places one owned Sticky Note, Basic Decoration, or GIF Slot using the strict body `{ownedItemId,x,y}`. Photo Frame remains unplaceable.
 - `PATCH /api/board/objects/:boardObjectId` saves normalized coordinates for either source type.
 - `DELETE /api/board/objects/:boardObjectId` idempotently removes only the placement.
 - `PATCH /api/board/sticky-notes/:ownedItemId` saves a strict `{body}` plain-text note. Empty notes are allowed.
+- `PUT /api/board/gifs/:ownedItemId` accepts only `{giphyId}`, validates canonical syntax and exact owned `gif-slot` identity, and persists that ID without contacting GIPHY.
 - `PATCH` and `DELETE /api/board/items/:hourRewardId` remain as reward-only compatibility routes.
 
 Board writes require the request `Origin` to match `APP_URL`; JSON writes also require `application/json` and use a 16 KiB parser limit. User identity and catalog type come only from the session and database. The browser cannot choose `userid`, `object_type`, an arbitrary asset URL, or a Chalk mutation. A board can contain at most 100 objects across reward and Shop sources; placement serializes on the user's board row before counting.
@@ -122,7 +123,7 @@ TO gostudy_web_owner;
 
 Do not make `gostudy_web` a member of `gostudy_web_owner` or `gostudy_chalk_owner`, and do not grant `gostudy_web` direct execution of `gostudy_purchase_board_item_chalk`. Keep the app unavailable to purchase traffic until the ownership transfer and owner-only wrapper grant are complete.
 
-Inventory returns legacy study rewards in `items` and purchased board instances in `shopItems`. Legacy rewards keep their existing Add to Board behavior. Sticky Note and Basic Decoration instances show Add to Board or On Board; GIF Slot and Photo Frame continue to show “Board support coming next.” Adding, removing, or re-adding an owned item never invokes the purchase function and never spends or refunds Chalk.
+Inventory returns legacy study rewards in `items` and purchased board instances in `shopItems`. Legacy rewards keep their existing Add to Board behavior. Sticky Note, Basic Decoration, and GIF Slot instances show Add to Board or On Board; Photo Frame continues to show its pending state. Adding, removing, or re-adding an owned item never invokes the purchase function and never spends or refunds Chalk.
 
 Disposable v20 coverage lives in `tests/integration/chapter3b_v20_setup.sql` and `tests/integration/chapter3b_board_shop.sql`. Load StudyLion schema v20 and web migrations 0001–0004 into a throwaway database, run the setup, apply migration 0005, and then run the Shop integration file. Never run this sequence against `lion_data`.
 
@@ -152,6 +153,33 @@ ALTER FUNCTION public.web_upsert_sticky_note(bigint, bigint, text)
 Do not make `gostudy_web` a member of `gostudy_web_owner`. The migration grants only placement table access, coordinate-only UPDATE, identity-sequence use, note SELECT, and execution of the ownership-checking note function.
 
 Disposable Chapter 4 coverage lives in `tests/integration/chapter4_legacy_board_setup.sql` and `tests/integration/chapter4_board_objects.sql`. Starting from StudyLion schema v20 and web migrations 0001–0005 in a throwaway database, load the legacy fixture, apply migration 0006, transfer ownership as the assertion script does, and run the Chapter 4 assertions. The suite proves exact legacy preservation, both uniqueness indexes, strict source/type ownership, note boundaries, remove/re-add persistence, and runtime permissions. Never run migration 0006 or the integration files against `lion_data` during validation.
+
+## GIPHY GIF Slots and migration 0007
+
+`VITE_GIPHY_API_KEY` must be a dedicated GIPHY Web platform key. Vite embeds it in browser code, so it is browser-visible by design; never reuse a Discord secret, session secret, server credential, or a key assigned to another platform. `.env.example` contains only a placeholder. Express neither reads nor returns this key.
+
+The custom picker sends direct browser Search requests to GIPHY with `cache: 'no-store'`. The official fetch SDK is not used because its public Search and Get-by-IDs methods retain response objects in an internal one-minute memory cache, which conflicts with this integration's no-media-URL-cache rule. The picker requests 24 G-rated GIFs at a time and displays the returned array in provider order: results are never filtered or reordered. Supported still and animated renditions are selected without rewriting their URLs. An unrenderable result remains in place with an unavailable card instead of being silently removed. Visible “Powered by GIPHY” attribution remains in the picker.
+
+`GET /api/board` returns only each configured `giphyId`. The browser batches up to 100 unique configured IDs through GIPHY's direct Get GIFs by ID call, merges the response back into the existing board order, and renders loading, unavailable, and retry states. Reduced-motion users receive a still rendition when available and never receive the animated no-still fallback. Media URLs and GIF bytes load directly from GIPHY; Go Study does not persist them, proxy them, rewrite them, or add an application cache.
+
+The selection route accepts only the canonical GIPHY ID. It proves exact session ownership and the `gif-slot` catalog type, then calls `web_upsert_board_gif` without contacting GIPHY. A syntactically valid ID that is missing or later removed from GIPHY remains safe durable identity and simply hydrates as unavailable in the browser. The client cannot submit title, dimensions, or URLs. `web_board_gifs` stores only `giphy_id` alongside Go Study ownership identity. A missing row remains a valid unconfigured slot.
+
+`web_board_gifs` is keyed by `owned_itemid` and uses `ON DELETE RESTRICT`. Removing a board object deletes only its placement, so ownership and the selected GIF survive and reappear when the slot is re-added. The runtime role can read this table but cannot modify it directly; its only write path is the `SECURITY DEFINER` function with `search_path = pg_catalog`, positive/bounded input checks, and repeated exact ownership/type validation.
+
+Apply migration 0007 with a controlled deployment role after migration 0006, then transfer every new object to the existing `gostudy_web_owner` NOLOGIN role before serving Chapter 5:
+
+```sql
+ALTER TABLE public.web_board_gifs OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_validate_board_gif_owner()
+  OWNER TO gostudy_web_owner;
+ALTER FUNCTION public.web_upsert_board_gif(
+  bigint, bigint, text
+) OWNER TO gostudy_web_owner;
+```
+
+Do not make `gostudy_web` a member of `gostudy_web_owner`, and do not grant it direct mutation on `web_board_gifs`. Keep GIF traffic paused until migration 0007, the ownership transfer, and the dedicated `VITE_GIPHY_API_KEY` Web key are configured in the frontend build environment.
+
+Disposable Chapter 5 coverage lives in `tests/integration/chapter5_board_gifs.sql`. Starting from StudyLion schema v20, load `chapter3b_v20_setup.sql`, apply migrations 0001–0007, and run that assertion file. It proves empty-slot behavior, identity-only persistence, cross-user/type rejection, runtime privileges, definer ownership, no Chalk mutation, and selected-GIF persistence through remove/re-add. Never run this sequence against `lion_data`.
 
 ## Production
 

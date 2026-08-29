@@ -168,7 +168,10 @@ export default function Inventory() {
   };
 
   const handleAddShopItemToBoard = async (item: ShopInventoryItem) => {
-    if (placingItemId || (item.itemType !== 'sticky_note' && item.itemType !== 'decoration')) {
+    if (placingItemId
+      || (item.itemType !== 'sticky_note'
+        && item.itemType !== 'decoration'
+        && item.itemType !== 'gif')) {
       return;
     }
     const position = findFirstFreePosition(boardItems);
@@ -279,7 +282,9 @@ export default function Inventory() {
                       Item #{item.ownedItemId}
                     </span>
                     <span className="mt-2 text-[10px] text-slate-600">Acquired {formatEarnedAt(item.acquiredAt)}</span>
-                    {item.itemType === 'sticky_note' || item.itemType === 'decoration' ? (
+                    {item.itemType === 'sticky_note'
+                      || item.itemType === 'decoration'
+                      || item.itemType === 'gif' ? (
                       <button
                         type="button"
                         onClick={() => void handleAddShopItemToBoard(item)}
@@ -300,7 +305,7 @@ export default function Inventory() {
                       </button>
                     ) : (
                       <div className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-xs font-semibold text-slate-500" aria-disabled="true">
-                        <Clock3 className="h-3.5 w-3.5" /> Board support coming next
+                        <Clock3 className="h-3.5 w-3.5" /> Photo Frame support coming next
                       </div>
                     )}
                   </motion.article>

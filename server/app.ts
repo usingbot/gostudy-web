@@ -117,6 +117,17 @@ import {
   upsertGuildPublication,
 } from './guild-data.js';
 import {
+  expandGuildBoard,
+  getAdminGuildBoard,
+  getPublicGuildBoard,
+  upsertGuildBoardTheme,
+} from './guild-board-data.js';
+import {
+  GuildBoardValidationError,
+  parseGuildBoardCapacityBody,
+  parseGuildBoardThemeBody,
+} from './guild-board-validation.js';
+import {
   GuildPublicationValidationError,
   parseGuildId,
   parseGuildPublicationBody,
@@ -299,6 +310,26 @@ export function createApp(
     response.json({servers: await getPublicGuilds(pool)});
   }));
 
+  app.get('/api/servers/:slug/board', asyncHandler(async (request, response) => {
+    response.set('Cache-Control', PUBLIC_DISCOVERY_CACHE_CONTROL);
+    let slug: string;
+    try {
+      slug = parseGuildSlug(request.params.slug);
+    } catch (error) {
+      if (error instanceof GuildPublicationValidationError) {
+        response.status(404).json({error: 'SERVER_NOT_FOUND'});
+        return;
+      }
+      throw error;
+    }
+    const board = await getPublicGuildBoard(pool, slug);
+    if (!board) {
+      response.status(404).json({error: 'SERVER_NOT_FOUND'});
+      return;
+    }
+    response.json({board});
+  }));
+
   app.get('/api/servers/:slug', asyncHandler(async (request, response) => {
     response.set('Cache-Control', PUBLIC_DISCOVERY_CACHE_CONTROL);
     let slug: string;
@@ -368,6 +399,122 @@ export function createApp(
       authorizationRefresh: 'next-login',
     });
   }));
+
+  app.get('/api/admin/servers/:guildid/board', asyncHandler(async (request, response) => {
+    try {
+      const guildId = parseGuildId(request.params.guildid);
+      const actorUserId = getAuthenticatedUserId(response);
+      const role = await getUserRole(pool, actorUserId);
+      const manageableGuildIds = readSessionManageableGuildIds(
+        request.session.manageableGuildIds,
+      );
+      if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+        response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+        return;
+      }
+      const board = await getAdminGuildBoard(pool, guildId);
+      if (!board) {
+        response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+        return;
+      }
+      response.json({board});
+    } catch (error) {
+      if (error instanceof GuildPublicationValidationError) {
+        response.status(400).json({error: 'INVALID_GUILD_BOARD_REQUEST'});
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.put(
+    '/api/admin/servers/:guildid/board/theme',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    adminMutationRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const input = parseGuildBoardThemeBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        const manageableGuildIds = readSessionManageableGuildIds(
+          request.session.manageableGuildIds,
+        );
+        if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+          response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+          return;
+        }
+        response.json({board: await upsertGuildBoardTheme(pool, guildId, actorUserId, input)});
+      } catch (error) {
+        if (error instanceof GuildPublicationValidationError
+          || error instanceof GuildBoardValidationError) {
+          response.status(400).json({error: 'INVALID_GUILD_BOARD'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === 'GGB01') {
+          response.status(409).json({error: 'GUILD_BOARD_REVISION_CONFLICT'});
+          return;
+        }
+        if (code === 'GSG01') {
+          response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+          return;
+        }
+        if (code === '22023' || code === '23514') {
+          response.status(400).json({error: 'INVALID_GUILD_BOARD'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.put(
+    '/api/admin/servers/:guildid/board/capacity',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    adminMutationRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const input = parseGuildBoardCapacityBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        if (role !== 'owner') {
+          response.status(403).json({error: 'GUILD_BOARD_CAPACITY_FORBIDDEN'});
+          return;
+        }
+        response.json({board: await expandGuildBoard(pool, guildId, actorUserId, input)});
+      } catch (error) {
+        if (error instanceof GuildPublicationValidationError
+          || error instanceof GuildBoardValidationError) {
+          response.status(400).json({error: 'INVALID_GUILD_BOARD_CAPACITY'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === 'GGB01') {
+          response.status(409).json({error: 'GUILD_BOARD_REVISION_CONFLICT'});
+          return;
+        }
+        if (code === 'GGB02') {
+          response.status(403).json({error: 'GUILD_BOARD_CAPACITY_FORBIDDEN'});
+          return;
+        }
+        if (code === 'GSG01') {
+          response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+          return;
+        }
+        if (code === '22023' || code === '23514') {
+          response.status(400).json({error: 'INVALID_GUILD_BOARD_CAPACITY'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
 
   app.put(
     '/api/admin/servers/:guildid',

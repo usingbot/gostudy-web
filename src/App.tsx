@@ -15,6 +15,7 @@ import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import AdminUserDetail from './pages/AdminUserDetail';
 import GuildPublishing from './pages/GuildPublishing';
+import GuildBoardEditor from './pages/GuildBoardEditor';
 import PublicServers from './pages/PublicServers';
 import PublicServerDetail from './pages/PublicServerDetail';
 import PublicLayout from './components/PublicLayout';
@@ -47,6 +48,7 @@ export default function App() {
             </Route>
             <Route element={<RequireGuildPublishing />}>
               <Route path="/admin/servers" element={<GuildPublishing />} />
+              <Route path="/admin/servers/:guildid/board" element={<GuildBoardEditor />} />
             </Route>
           </Route>
         </Route>

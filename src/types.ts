@@ -205,6 +205,19 @@ export interface PublicGuild {
   inviteUrl: string | null;
 }
 
+export type GuildBoardTheme = 'midnight' | 'mint' | 'cork' | 'paper';
+
+export interface GuildBoard {
+  theme: GuildBoardTheme;
+  width: number;
+  height: number;
+  revision: string;
+}
+
+export interface PublicGuildBoard extends GuildBoard {
+  objects: Record<string, unknown>[];
+}
+
 export interface KnownDiscordIdentity {
   username: string;
   globalName: string | null;

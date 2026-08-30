@@ -4,11 +4,13 @@ import {
   ExternalLink,
   Hash,
   LoaderCircle,
+  Paintbrush,
   Save,
   ServerCog,
   Users,
   X,
 } from 'lucide-react';
+import {Link} from 'react-router-dom';
 
 import {
   fetchManageableGuilds,
@@ -122,7 +124,7 @@ function GuildEditor({
         <label className="flex cursor-pointer items-center justify-between gap-5 rounded-xl border border-slate-700 bg-slate-950/60 p-4">
           <span>
             <span className="block font-semibold">Public server page</span>
-            <span className="mt-1 block text-xs text-slate-500">Prepared for Chapter 7C. No public gallery is exposed yet.</span>
+            <span className="mt-1 block text-xs text-slate-500">Share this server’s profile and Study Board at its public URL.</span>
           </span>
           <span className="relative inline-flex h-7 w-12 shrink-0 items-center">
             <input
@@ -306,13 +308,21 @@ export default function GuildPublishing() {
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedGuildId(guild.guildid)}
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-indigo-500/60 hover:text-indigo-200"
-                >
-                  Edit <ExternalLink className="h-3.5 w-3.5" />
-                </button>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGuildId(guild.guildid)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-indigo-500/60 hover:text-indigo-200"
+                  >
+                    Publication <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                  <Link
+                    to={`/admin/servers/${guild.guildid}/board`}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-indigo-500/60 hover:text-indigo-200"
+                  >
+                    Edit Board <Paintbrush className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
               </article>
             ))}
           </section>

@@ -2,14 +2,16 @@ import {ArrowLeft, ArrowUpRight, LayoutGrid, LoaderCircle, RefreshCw} from 'luci
 import {useEffect, useState} from 'react';
 import {Link, useParams} from 'react-router-dom';
 
+import {fetchPublicGuildBoard, GuildBoardsApiError} from '../api/guildBoards';
 import {fetchPublicGuild, PublicServersApiError} from '../api/publicServers';
 import DiscordGuildIcon from '../components/DiscordGuildIcon';
+import GuildBoardCanvas from '../components/GuildBoardCanvas';
 import {GuildTags, MemberCount} from '../components/PublicServerCard';
-import type {PublicGuild} from '../types';
+import type {PublicGuild, PublicGuildBoard} from '../types';
 
 type DetailState =
   | {status: 'loading'}
-  | {status: 'ready'; guild: PublicGuild}
+  | {status: 'ready'; guild: PublicGuild; board: PublicGuildBoard}
   | {status: 'not-found'}
   | {status: 'error'};
 
@@ -21,11 +23,15 @@ export default function PublicServerDetail() {
   useEffect(() => {
     const controller = new AbortController();
     setState({status: 'loading'});
-    fetchPublicGuild(slug, controller.signal)
-      .then((guild) => setState({status: 'ready', guild}))
+    Promise.all([
+      fetchPublicGuild(slug, controller.signal),
+      fetchPublicGuildBoard(slug, controller.signal),
+    ])
+      .then(([guild, board]) => setState({status: 'ready', guild, board}))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        setState(error instanceof PublicServersApiError && error.status === 404
+        setState((error instanceof PublicServersApiError || error instanceof GuildBoardsApiError)
+          && error.status === 404
           ? {status: 'not-found'}
           : {status: 'error'});
       });
@@ -69,7 +75,7 @@ export default function PublicServerDetail() {
     );
   }
 
-  const {guild} = state;
+  const {guild, board} = state;
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 md:px-8 md:py-12">
       <Link to="/servers" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-400 transition hover:text-white">
@@ -116,12 +122,13 @@ export default function PublicServerDetail() {
             <h2 id="study-board-heading" className="text-2xl font-black">Study Board</h2>
           </div>
         </div>
-        <div className="mt-8 flex min-h-52 items-center justify-center rounded-3xl border border-dashed border-white/15 bg-black/15 px-6 text-center">
-          <div className="max-w-md">
-            <h3 className="font-bold text-slate-200">The board is ready for its next chapter</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-500">Public board content is not available yet. This space will become the server’s shared Study Board without inventing posts or activity.</p>
-          </div>
-        </div>
+        <GuildBoardCanvas
+          theme={board.theme}
+          width={board.width}
+          height={board.height}
+          objects={board.objects}
+          className="mt-8"
+        />
       </section>
     </main>
   );

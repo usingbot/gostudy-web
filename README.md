@@ -8,7 +8,7 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20. Migration `0010_create_guild_publishing.sql` requires StudyLion schema v21. Deploy each migration before its matching application build.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20. Migration `0010_create_guild_publishing.sql` requires StudyLion schema v21, and `0011_create_guild_boards.sql` requires StudyLion schema v22. Deploy each migration before its matching application build.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
@@ -270,6 +270,48 @@ Documented production sequence—do not execute it during development validation
 11. Keep the public server gallery unavailable until Chapter 7C.
 
 Disposable Chapter 7B coverage lives in `tests/integration/chapter7b_guild_publishing.sql`. Create a throwaway database from the current StudyLion `data/schema.sql` v21, create the web runtime/owner roles using the established disposable setup, apply web migrations 0001–0010 in numeric order, and run the Chapter 7B assertions. The script checks schema version, constraints, unique slug, validation, atomic tags, active-guild enforcement, ownership transfer, and least privilege. Never point this sequence at `lion_data`.
+
+## Persistent public guild boards and migration 0011
+
+Each active, published guild has a finite public Study Board surface. `public.web_guild_boards` stores only its fixed theme, fixed-tier logical dimensions, optimistic revision, audit actors, and timestamps; it deliberately has no foreign key to bot-owned guild metadata or publication storage. A public guild without a row receives the canonical `midnight` theme, `3000 × 1800` starter canvas, revision `"0"`, and `objects: []`. Anonymous reads never create a row. The only other themes are `mint`, `cork`, and `paper`; all four backgrounds are fixed CSS-only designs. There is no custom CSS, arbitrary color or URL, R2 background, or upload path.
+
+`GET /api/servers/:slug/board` is anonymous and independently requires an active bot registry row plus a public publication with the requested canonical slug. `GET /api/admin/servers/:guildid/board` and `PUT /api/admin/servers/:guildid/board/theme` require the same Chapter 7B Discord guild authorization: current owner, Administrator, or Manage Server authorization captured at login, with only the Go Study web `owner` role receiving a global active-guild override. An ordinary web `admin` has no override. The mutation actor always comes from the session.
+
+`public.web_upsert_guild_board_theme(bigint,text,bigint,bigint)` is the guild-manager theme write path. A missing row accepts expected revision `0`, creates the starter canvas, and becomes revision `1`; an existing row accepts only its exact current revision, preserves dimensions, and increments it. A stale editor receives `GUILD_BOARD_REVISION_CONFLICT` and must reload instead of overwriting another administrator's save.
+
+Canvas capacity uses four exact pairs: Starter `3000 × 1800`, Expanded `4500 × 2700`, Large `6000 × 3600`, and Mega `9000 × 5400`. `PUT /api/admin/servers/:guildid/board/capacity` and `public.web_expand_guild_board(bigint,integer,integer,bigint,bigint)` are reserved to the Go Study platform `owner`; the function independently verifies that role from `web_user_roles`. Guild managers and ordinary web admins cannot expand. Expansion must move to a strictly larger tier, adds logical space to the right and bottom from a stable top-left origin, and never changes existing or future object coordinates. Shrinking is not supported. Chapter 7D intentionally imposes no object-count limit.
+
+Public and admin previews use the same transformed DOM viewport. The browser fits the board initially, supports 30–200% zoom, 100%, pointer/touch/middle-button and wheel panning, and Ctrl/Cmd-wheel pointer-centered zoom with bounded visual overscroll. Pan and zoom are ephemeral browser camera state: they are never sent to the API or persisted. The logical surface does not allocate a 9000 × 5400 bitmap.
+
+### Deploying migration 0011
+
+Documented production sequence—do not execute it during development validation:
+
+1. Back up `lion_data` using the established StudyLion procedure.
+2. Verify the deployed StudyLion schema is v22.
+3. Apply `migrations/0011_create_guild_boards.sql` with a controlled deployment role.
+4. Transfer the new table and function to the existing `gostudy_web_owner` NOLOGIN role:
+
+   ```sql
+   ALTER TABLE public.web_guild_boards OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_upsert_guild_board_theme(
+     bigint, text, bigint, bigint
+   ) OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_expand_guild_board(
+     bigint, integer, integer, bigint, bigint
+   ) OWNER TO gostudy_web_owner;
+   ```
+
+5. Verify `gostudy_web` has board-table `SELECT` and execution of only the two narrow board functions; verify it has no direct board mutation, PUBLIC cannot execute either function, it is not a member of `gostudy_web_owner`, and the bot guild-registry ACLs remain unchanged and read-only.
+6. Build and deploy the web application.
+7. Open one test guild's board editor from `/admin/servers`.
+8. Select and save one fixed theme, then—while signed in as the Go Study owner—deliberately expand one tier and reload to verify the persisted revision and dimensions.
+9. Open the guild's public page anonymously and verify the same theme, dimensions, pan/zoom controls, and honest empty state.
+10. Do not add decorations until Chapter 7E.
+
+Discord emoji and sticker board objects, their picker, placement, dragging, movement permissions, ownership, and Chalk costs are deferred to Chapter 7E. Chapter 7D has no decoration controls and returns an empty object array by design. Living Board vitality/decay is deferred until after Chapter 7E.
+
+Disposable Chapter 7D coverage lives in `tests/integration/chapter7d_acl_snapshot.sql` and `tests/integration/chapter7d_guild_boards.sql`. In one isolated PostgreSQL database, load current StudyLion `data/schema.sql` v22, create non-superuser `gostudy_web` and NOLOGIN owner roles, run the established v20 ownership setup, and apply web migrations 0001–0010. Then, in one psql session, run the ACL snapshot, migration 0011, and Chapter 7D assertions in that order. The test proves constraints, all four themes and capacity tiers, active-guild enforcement, dimension-preserving theme saves, owner-only non-shrinking expansion, optimistic revisions and atomic conflicts, real non-owner runtime privileges, PUBLIC revocation, no bot-registry foreign key, and unchanged guild-registry ACLs. Drop the disposable cluster afterward; never point this sequence at `lion_data`.
 
 ## Production
 

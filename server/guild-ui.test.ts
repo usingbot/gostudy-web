@@ -98,17 +98,21 @@ test('public gallery renders real fields, graceful fallbacks, tags, and conditio
 });
 
 test('public detail renders guild metadata and an honest empty Study Board foundation', async () => {
-  const page = await readFile('src/pages/PublicServerDetail.tsx', 'utf8');
+  const [page, canvas] = await Promise.all([
+    readFile('src/pages/PublicServerDetail.tsx', 'utf8'),
+    readFile('src/components/GuildBoardCanvas.tsx', 'utf8'),
+  ]);
   assert.match(page, /guild\.name/);
   assert.match(page, /guild\.description/);
   assert.match(page, /MemberCount count=\{guild\.memberCount\}/);
   assert.match(page, /GuildTags tags=\{guild\.tags\}/);
   assert.match(page, /Study Board/);
-  assert.match(page, /Public board content is not available yet/);
+  assert.match(page, /GuildBoardCanvas/);
+  assert.match(canvas, /Nothing has been pinned here yet/);
   assert.match(page, /Server not found/);
   assert.match(page, /This server could not be loaded/);
   assert.doesNotMatch(page, /dangerouslySetInnerHTML|online members|study hours|active students|streak/i);
-  assert.doesNotMatch(page, /fetchBoard|board\/objects|board\/items/);
+  assert.doesNotMatch(page, /board\/objects|board\/items/);
 });
 
 test('real Discord icons are alpha-safe while missing icons retain the gradient fallback', async () => {

@@ -162,6 +162,7 @@ test('self returns current database role while protected routes deny normal user
         manageAdmin: false,
         manageOwner: false,
       },
+      canManageGuildPublishing: false,
     });
     const denied = await fetch(`${baseUrl}/api/admin/users?query=200`, {headers});
     assert.equal(denied.status, 403);

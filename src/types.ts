@@ -168,6 +168,30 @@ export interface RoleCapabilities {
 export interface AdminSelf {
   role: UserRole;
   capabilities: RoleCapabilities;
+  canManageGuildPublishing: boolean;
+}
+
+export interface GuildPublicationSettings {
+  slug: string;
+  isPublic: boolean;
+  inviteUrl: string | null;
+  tags: string[];
+}
+
+export interface ManageableGuild {
+  guildid: string;
+  name: string;
+  iconUrl: string | null;
+  bannerUrl: string | null;
+  description: string | null;
+  memberCount: number | null;
+  active: boolean;
+  publication: GuildPublicationSettings | null;
+}
+
+export interface ManageableGuildsResponse {
+  guilds: ManageableGuild[];
+  authorizationRefresh: 'next-login';
 }
 
 export interface KnownDiscordIdentity {

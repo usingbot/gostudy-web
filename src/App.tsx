@@ -14,8 +14,10 @@ import StudyBoard from './pages/StudyBoard';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import AdminUserDetail from './pages/AdminUserDetail';
+import GuildPublishing from './pages/GuildPublishing';
 import RequireAuth from './auth/RequireAuth';
 import RequireAdmin from './auth/RequireAdmin';
+import RequireGuildPublishing from './auth/RequireGuildPublishing';
 
 export default function App() {
   return (
@@ -35,6 +37,9 @@ export default function App() {
             <Route element={<RequireAdmin />}>
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/users/:userid" element={<AdminUserDetail />} />
+            </Route>
+            <Route element={<RequireGuildPublishing />}>
+              <Route path="/admin/servers" element={<GuildPublishing />} />
             </Route>
           </Route>
         </Route>

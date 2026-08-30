@@ -105,6 +105,20 @@ import {
   parseSinglePhotoUpload,
   PhotoUploadValidationError,
 } from './photo-upload.js';
+import {
+  hasManageableActiveGuild,
+  mayManageGuild,
+  readSessionManageableGuildIds,
+} from './guild-auth.js';
+import {
+  getManageableGuilds,
+  upsertGuildPublication,
+} from './guild-data.js';
+import {
+  GuildPublicationValidationError,
+  parseGuildId,
+  parseGuildPublicationBody,
+} from './guild-validation.js';
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
 const DEFAULT_RETURN_TO = '/dashboard';
@@ -115,9 +129,10 @@ const ALLOWED_RETURN_TO = new Set([
   '/board',
   '/settings',
   '/admin',
+  '/admin/servers',
 ] as const);
 
-type AllowedReturnTo = '/dashboard' | '/inventory' | '/shop' | '/board' | '/settings' | '/admin';
+type AllowedReturnTo = '/dashboard' | '/inventory' | '/shop' | '/board' | '/settings' | '/admin' | '/admin/servers';
 
 export interface CreateAppOptions {
   sessionStore?: session.Store;
@@ -297,10 +312,80 @@ export function createApp(
     next();
   }, requireDataAuthentication);
 
-  app.get('/api/admin/me', asyncHandler(async (_request, response) => {
+  app.get('/api/admin/me', asyncHandler(async (request, response) => {
     const role = await getUserRole(pool, getAuthenticatedUserId(response));
-    response.json({role, capabilities: getRoleCapabilities(role)});
+    const manageableGuildIds = readSessionManageableGuildIds(
+      request.session.manageableGuildIds,
+    );
+    response.json({
+      role,
+      capabilities: getRoleCapabilities(role),
+      canManageGuildPublishing: await hasManageableActiveGuild(
+        pool,
+        role,
+        manageableGuildIds,
+      ),
+    });
   }));
+
+  app.get('/api/admin/servers', asyncHandler(async (request, response) => {
+    const role = await getUserRole(pool, getAuthenticatedUserId(response));
+    const manageableGuildIds = readSessionManageableGuildIds(
+      request.session.manageableGuildIds,
+    );
+    response.json({
+      guilds: await getManageableGuilds(pool, manageableGuildIds, role === 'owner'),
+      authorizationRefresh: 'next-login',
+    });
+  }));
+
+  app.put(
+    '/api/admin/servers/:guildid',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    adminMutationRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const input = parseGuildPublicationBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        const manageableGuildIds = readSessionManageableGuildIds(
+          request.session.manageableGuildIds,
+        );
+        if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+          response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+          return;
+        }
+        const guild = await upsertGuildPublication(pool, guildId, actorUserId, input);
+        if (!guild) {
+          response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+          return;
+        }
+        response.json({guild});
+      } catch (error) {
+        if (error instanceof GuildPublicationValidationError) {
+          response.status(400).json({error: 'INVALID_GUILD_PUBLICATION'});
+          return;
+        }
+        const code = databaseErrorCode(error);
+        if (code === '23505') {
+          response.status(409).json({error: 'GUILD_SLUG_CONFLICT'});
+          return;
+        }
+        if (code === 'GSG01') {
+          response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+          return;
+        }
+        if (code === '22023' || code === '23514') {
+          response.status(400).json({error: 'INVALID_GUILD_PUBLICATION'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
 
   app.use('/api/admin', requireAdmin(pool));
 
@@ -474,13 +559,14 @@ export function createApp(
       return;
     }
 
-    const discordUser = await exchangeCodeForDiscordUser(config, code);
+    const discordOAuth = await exchangeCodeForDiscordUser(config, code);
 
     await regenerateSession(request);
-    request.session.discordUserId = discordUser.id;
-    request.session.username = discordUser.username;
-    request.session.globalName = discordUser.globalName;
-    request.session.avatarHash = discordUser.avatarHash;
+    request.session.discordUserId = discordOAuth.user.id;
+    request.session.username = discordOAuth.user.username;
+    request.session.globalName = discordOAuth.user.globalName;
+    request.session.avatarHash = discordOAuth.user.avatarHash;
+    request.session.manageableGuildIds = discordOAuth.manageableGuildIds;
     await saveSession(request);
 
     response.redirect(returnTo);

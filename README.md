@@ -8,12 +8,12 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20; deploy each migration before its matching application build.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20. Migration `0010_create_guild_publishing.sql` requires StudyLion schema v21. Deploy each migration before its matching application build.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
 
-Vite listens on port 3000 and proxies `/api` and `/auth` to Express on port 8787. The OAuth request uses only Discord's `identify` scope.
+Vite listens on port 3000 and proxies `/api` and `/auth` to Express on port 8787. Discord OAuth requests the `identify` and `guilds` scopes.
 
 ## Authenticated data API
 
@@ -231,6 +231,45 @@ Do not execute deployment from a development validation session. The reviewed pr
 10. Commit only after code, migration, permissions, and smoke-test review.
 
 Disposable Chapter 6 coverage lives in `tests/integration/chapter6_photo_frames.sql`. Start from StudyLion schema v20, run `chapter3b_v20_setup.sql`, apply web migrations 0001–0009, transfer ownership as the assertion script does, and run the Chapter 6 assertions. It tests exact ownership/type boundaries, constraints, revision conflicts, least privilege, no Chalk mutation, and placement removal/re-add persistence. Never run the migration or integration script against `lion_data` during validation. Unit and route tests mock storage and require no real R2 credentials.
+
+## Guild Publishing foundation and migration 0010
+
+Discord OAuth requests `identify guilds`. During the callback, Express uses the temporary access token to request `GET /users/@me` and `GET /users/@me/guilds`. It keeps only the user identity and guild IDs for which Discord reports owner status, Manage Guild (`1 << 5`), or Administrator (`1 << 3`) in the server-side session. The OAuth token and guild/member payloads are not returned to the browser or persisted as application data. Guild-management authorization is a session snapshot and refreshes at the next Discord login/session renewal; re-login after a Discord permission change.
+
+An authenticated user can configure a guild only when that guild ID is present in the OAuth authorization snapshot and `public.gostudy_guilds` currently contains an active row. The Go Study web `owner` role is the sole global development/bootstrap override for active registered guilds. The ordinary web `admin` role does not grant Discord guild-management rights. Platform administration and Discord guild administration remain separate.
+
+`public.web_guild_publications` owns only publication state: canonical unique slug, public/hidden state, normalized Discord invite code, audit actors, and timestamps. `public.web_guild_tags` owns an ordered normalized tag list with at most five admin-defined display tags. Guild name, icon, banner, description, and member count remain authoritative in StudyLion schema v21's bot-owned `public.gostudy_guilds`; the web application receives narrow `SELECT` only and never mutates that registry. There is deliberately no foreign key from web publication storage to the bot-owned table. The service and `web_upsert_guild_publication` both validate that an active registered guild exists.
+
+Slugs are 3–64 lowercase ASCII letters, digits, and single separating hyphens. Invalid slugs are rejected rather than rewritten. The admin supplies an existing canonical `https://discord.gg/<code>` or `https://discord.com/invite/<code>` URL. Go Study does not ask the bot to create an invite; only the invite code is persisted. Tags are plain text, trimmed, 1–24 visible characters, unique case-insensitively, and capped at five. The function replaces publication settings and the complete ordered tag set in one transaction.
+
+`GET /api/admin/servers` returns only active registered guilds the session may manage, or all active guilds for the owner override. `PUT /api/admin/servers/:guildid` requires authentication, exact same-origin, JSON media type, the 16 KiB parser limit, strict fields, a session-derived actor, and server-side guild authorization before invoking the database function. The server-side `getPublicGuilds` read model joins registry, publication, and tags and qualifies only active guilds whose publication is public. Chapter 7B does not expose `/servers` or a public gallery.
+
+### Deploying migration 0010
+
+Documented production sequence—do not execute it during development validation:
+
+1. Confirm Discord OAuth allows the existing redirect URI and the application requests both `identify` and `guilds`.
+2. Back up `lion_data` using the established StudyLion procedure.
+3. Confirm the deployed StudyLion schema is v21 and includes the bot-owned guild registry.
+4. Apply `migrations/0010_create_guild_publishing.sql` with a controlled deployment role.
+5. Confirm `gostudy_web` and `gostudy_web_owner` have `SELECT` on `public.gostudy_guilds`, with no registry mutation privileges.
+6. Transfer the web publication objects to the existing `gostudy_web_owner` NOLOGIN role:
+
+   ```sql
+   ALTER TABLE public.web_guild_publications OWNER TO gostudy_web_owner;
+   ALTER TABLE public.web_guild_tags OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_upsert_guild_publication(
+     bigint, text, boolean, text, text[], bigint
+   ) OWNER TO gostudy_web_owner;
+   ```
+
+7. Verify `gostudy_web` has only publication-table `SELECT`, guild-registry `SELECT`, and execution of the narrow upsert function; verify PUBLIC cannot execute it and the runtime role is not a member of the owner role.
+8. Build and deploy the web application.
+9. Re-login with Discord to refresh the server-side guild authorization snapshot.
+10. Configure one test guild publication in `/admin/servers` and verify settings reload.
+11. Keep the public server gallery unavailable until Chapter 7C.
+
+Disposable Chapter 7B coverage lives in `tests/integration/chapter7b_guild_publishing.sql`. Create a throwaway database from the current StudyLion `data/schema.sql` v21, create the web runtime/owner roles using the established disposable setup, apply web migrations 0001–0010 in numeric order, and run the Chapter 7B assertions. The script checks schema version, constraints, unique slug, validation, atomic tags, active-guild enforcement, ownership transfer, and least privilege. Never point this sequence at `lion_data`.
 
 ## Production
 

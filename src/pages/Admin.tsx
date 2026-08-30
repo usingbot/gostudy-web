@@ -1,6 +1,6 @@
 import {useEffect, useState, type FormEvent} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
-import {History, Search, ShieldCheck, UserRoundSearch} from 'lucide-react';
+import {History, Search, ServerCog, ShieldCheck, UserRoundSearch} from 'lucide-react';
 
 import {
   AdminApiError,
@@ -78,6 +78,20 @@ export default function Admin() {
           Signed in as <span className="font-bold capitalize text-indigo-300">{admin.role}</span>
         </div>
       </header>
+
+      <Link
+        to="/admin/servers"
+        className="flex items-center justify-between rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-5 transition hover:border-indigo-400/60"
+      >
+        <span className="flex items-center gap-3">
+          <span className="rounded-xl bg-indigo-500/15 p-2 text-indigo-300"><ServerCog className="h-5 w-5" /></span>
+          <span>
+            <span className="block font-semibold">Guild Publishing</span>
+            <span className="mt-1 block text-xs text-slate-400">Configure visibility, slugs, invites, and tags for authorized Discord servers.</span>
+          </span>
+        </span>
+        <span className="text-sm font-semibold text-indigo-300">Open</span>
+      </Link>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="rounded-2xl border border-slate-800 bg-[#18181b] p-6 lg:col-span-2">

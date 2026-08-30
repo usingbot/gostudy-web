@@ -1,5 +1,5 @@
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
-import { Home, Backpack, Grid2X2, Settings, LogOut, ShieldCheck, ShoppingBag } from 'lucide-react';
+import { Home, Backpack, Grid2X2, Settings, LogOut, ServerCog, ShieldCheck, ShoppingBag } from 'lucide-react';
 import {useState} from 'react';
 import {useAuth} from '../auth/AuthProvider';
 import {shouldShowAdminNavigation} from '../auth/admin-capabilities';
@@ -30,7 +30,10 @@ export default function Layout() {
     { name: 'Study Board', path: '/board', icon: Grid2X2 },
     { name: 'Settings', path: '/settings', icon: Settings },
     ...(shouldShowAdminNavigation(admin)
-      ? [{name: 'Admin', path: '/admin', icon: ShieldCheck}]
+      ? [
+          ...(admin?.capabilities.accessAdmin ? [{name: 'Admin', path: '/admin', icon: ShieldCheck}] : []),
+          {name: 'Guilds', path: '/admin/servers', icon: ServerCog},
+        ]
       : []),
   ];
 

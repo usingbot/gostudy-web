@@ -12,7 +12,6 @@ import {
   BoardItemAlreadyPlacedError,
   BoardItemNotFoundError,
   BoardItemNotOwnedError,
-  BoardItemUnsupportedError,
   BoardValidationError,
   countStickyNoteCharacters,
   countStickyNoteWords,
@@ -115,6 +114,10 @@ function makeRewardRow(
     shop_item_type: null,
     sticky_body: null,
     gif_giphy_id: null,
+    photo_object_key: null,
+    photo_width: null,
+    photo_height: null,
+    photo_revision: null,
   };
 }
 
@@ -157,6 +160,10 @@ function makeShopRow(
     shop_item_type: itemType,
     sticky_body: itemType === 'sticky_note' ? body : '',
     gif_giphy_id: null,
+    photo_object_key: null,
+    photo_width: null,
+    photo_height: null,
+    photo_revision: null,
   };
 }
 
@@ -254,6 +261,7 @@ test('all board APIs reject unauthenticated requests before parsing or querying'
       ['/api/board/objects/1', {method: 'PATCH'}],
       ['/api/board/objects/1', {method: 'DELETE'}],
       ['/api/board/sticky-notes/1', {method: 'PATCH'}],
+      ['/api/board/photo-frames/1/image', {method: 'PUT'}],
     ];
     for (const [path, options] of requests) {
       const response = await fetch(`${baseUrl}${path}`, options);
@@ -323,6 +331,44 @@ test('GET returns persisted GIF identity and an unconfigured GIF Slot as null', 
     y: 0.2,
   });
   assert.equal(items[1].source === 'shop' ? items[1].gif : undefined, null);
+});
+
+test('GET signs configured Photo Frames without exposing durable object keys', async () => {
+  const configured = {
+    ...makeShopRow('photo_frame', '77', '88'),
+    photo_object_key: 'photo-frames/77/12345678-1234-4123-8123-123456789abc.webp',
+    photo_width: 1200,
+    photo_height: 800,
+    photo_revision: '3',
+  };
+  const signedKeys: string[] = [];
+  const items = await getBoardItems(
+    createPool(() => [configured, makeShopRow('photo_frame', '78', '89')]),
+    '123456789',
+    async (key) => {
+      signedKeys.push(key);
+      return 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/private-signed';
+    },
+  );
+  assert.deepEqual(signedKeys, [configured.photo_object_key]);
+  assert.deepEqual(items[0], {
+    boardObjectId: '88',
+    source: 'shop',
+    ownedItemId: '77',
+    itemKey: 'photo-frame',
+    displayName: 'Photo Frame',
+    itemType: 'photo_frame',
+    photo: {
+      url: 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/private-signed',
+      width: 1200,
+      height: 800,
+      revision: '3',
+    },
+    x: 0.7,
+    y: 0.2,
+  });
+  assert.equal(items[1].source === 'shop' ? items[1].photo : undefined, null);
+  assert.doesNotMatch(JSON.stringify(items), /object_key|photo-frames\/77/);
 });
 
 test('GIPHY selection validation accepts only one canonical ID field', () => {
@@ -399,17 +445,18 @@ test('GIF Slot is placeable before a GIF is selected', async () => {
   assert.equal(item.gif, null);
 });
 
-test('Photo Frame remains owned but unplaceable', async () => {
+test('Photo Frame is placeable empty and derives its type without Chalk mutation', async () => {
   const calls: QueryCall[] = [];
-  await assert.rejects(
-    createShopBoardItem(
-      createPool(() => [], shopPlacementHandler('photo_frame'), calls),
-      '123456789',
-      {ownedItemId: '55', x: 0.5, y: 0.5},
-    ),
-    BoardItemUnsupportedError,
+  const item = await createShopBoardItem(
+    createPool(() => [], shopPlacementHandler('photo_frame'), calls),
+    '123456789',
+    {ownedItemId: '55', x: 0.5, y: 0.5},
   );
-  assert(!calls.some((call) => call.text.includes('web_study_board_objects') && call.text.includes('INSERT')));
+  assert.equal(item.itemType, 'photo_frame');
+  assert.equal(item.photo, null);
+  const insert = calls.find((call) => call.text.includes('WITH owned_shop_item AS'));
+  assert.match(insert?.text ?? '', /'photo_frame'/);
+  assert.doesNotMatch(calls.map((call) => call.text).join('\n'), /chalk/i);
 });
 
 test('strict placement bodies never accept forged userid or object type', () => {

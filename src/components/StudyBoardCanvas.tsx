@@ -14,6 +14,7 @@ interface StudyBoardCanvasProps {
   onEditStickyNote: (ownedItemId: string) => void;
   onEditGif: (ownedItemId: string) => void;
   onRetryGif: (ownedItemId: string) => void;
+  onEditPhoto: (ownedItemId: string) => void;
 }
 
 export default function StudyBoardCanvas({
@@ -27,6 +28,7 @@ export default function StudyBoardCanvas({
   onEditStickyNote,
   onEditGif,
   onRetryGif,
+  onEditPhoto,
 }: StudyBoardCanvasProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const [boardSize, setBoardSize] = useState({width: 0, height: 0});
@@ -49,6 +51,7 @@ export default function StudyBoardCanvas({
   const rewardItemSize = Math.max(48, Math.min(86, boardSize.width * 0.105));
   const stickyNoteSize = Math.max(72, Math.min(124, boardSize.width * 0.15));
   const gifSlotSize = Math.max(92, Math.min(154, boardSize.width * 0.18));
+  const photoFrameSize = Math.max(104, Math.min(168, boardSize.width * 0.19));
 
   return (
     <div className="rounded-3xl border border-slate-700/80 bg-[#111113] p-3 shadow-2xl shadow-black/30 sm:p-5">
@@ -87,6 +90,8 @@ export default function StudyBoardCanvas({
               ? stickyNoteSize
               : item.source === 'shop' && item.itemType === 'gif'
                 ? gifSlotSize
+                : item.source === 'shop' && item.itemType === 'photo_frame'
+                  ? photoFrameSize
                 : rewardItemSize}
             saveState={saveStates[item.boardObjectId] ?? 'idle'}
             onPositionChange={onPositionChange}
@@ -97,6 +102,7 @@ export default function StudyBoardCanvas({
             onEditStickyNote={onEditStickyNote}
             onEditGif={onEditGif}
             onRetryGif={onRetryGif}
+            onEditPhoto={onEditPhoto}
           />
         ))}
       </div>

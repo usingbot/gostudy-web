@@ -107,11 +107,12 @@ test('GIF UI has no arbitrary URL input or HTML injection path', async () => {
   assert.doesNotMatch(combined, /dangerouslySetInnerHTML|contentEditable|type="url"|<iframe|<embed/);
 });
 
-test('Inventory makes GIF Slot placeable while Photo Frame remains pending', async () => {
+test('Inventory keeps GIF Slot placeable when Photo Frame support is enabled', async () => {
   const inventory = await readFile('src/pages/Inventory.tsx', 'utf8');
   assert.match(inventory, /item\.itemType !== 'gif'/);
   assert.match(inventory, /item\.itemType === 'gif'/);
-  assert.match(inventory, /Photo Frame support coming next/);
+  assert.match(inventory, /item\.itemType !== 'photo_frame'/);
+  assert.doesNotMatch(inventory, /Photo Frame support coming next/);
 });
 
 test('server CSP permits direct browser GIPHY API and media loads without proxy routes', async () => {

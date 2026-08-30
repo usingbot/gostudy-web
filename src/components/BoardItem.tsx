@@ -4,7 +4,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
-import {Film, LoaderCircle, Pencil, RefreshCw, RotateCcw, Trash2} from 'lucide-react';
+import {Film, ImagePlus, LoaderCircle, Pencil, RefreshCw, RotateCcw, Trash2} from 'lucide-react';
 
 import {renderRewardAsset, renderShopItem} from './IconMap';
 import type {BoardObject, BoardPosition} from '../types';
@@ -26,6 +26,7 @@ interface BoardItemProps {
   onEditStickyNote: (ownedItemId: string) => void;
   onEditGif: (ownedItemId: string) => void;
   onRetryGif: (ownedItemId: string) => void;
+  onEditPhoto: (ownedItemId: string) => void;
 }
 
 function clamp(value: number): number {
@@ -46,6 +47,7 @@ export default function BoardItem({
   onEditStickyNote,
   onEditGif,
   onRetryGif,
+  onEditPhoto,
 }: BoardItemProps) {
   const draggingRef = useRef(false);
   const grabOffsetRef = useRef({x: 0, y: 0});
@@ -166,6 +168,8 @@ export default function BoardItem({
             ? 'rotate-[-1.5deg] rounded-sm border-amber-200/50 bg-[#f3dc82] text-slate-900 shadow-amber-950/25 hover:bg-[#f8e69b]'
             : item.source === 'shop' && item.itemType === 'gif'
               ? 'overflow-hidden rounded-2xl bg-[#09090b] p-1.5 backdrop-blur-sm'
+              : item.source === 'shop' && item.itemType === 'photo_frame'
+                ? 'overflow-hidden rounded-lg border-amber-100/40 bg-gradient-to-br from-amber-100 via-amber-300 to-amber-700 p-2 shadow-amber-950/40'
               : 'rounded-2xl bg-[#111827]/95 backdrop-blur-sm'
         } ${
           saveState === 'error'
@@ -241,6 +245,22 @@ export default function BoardItem({
               <span className="text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">Choose GIF</span>
             </span>
           )
+        ) : item.itemType === 'photo_frame' ? (
+          item.photo ? (
+            <span className="block h-full w-full overflow-hidden rounded-sm border border-black/35 bg-slate-950 shadow-inner">
+              <img
+                src={item.photo.url}
+                alt={`Photo in ${item.displayName}`}
+                draggable={false}
+                className="pointer-events-none h-full w-full object-cover"
+              />
+            </span>
+          ) : (
+            <span className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-sm border border-dashed border-amber-950/35 bg-slate-950/90 px-2 text-center text-amber-100">
+              <ImagePlus className="h-[32%] w-[32%]" />
+              <span className="text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">Upload photo</span>
+            </span>
+          )
         ) : (
           <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-fuchsia-200">
             {renderShopItem(item.itemType, 'h-[42%] w-[42%]')}
@@ -274,6 +294,19 @@ export default function BoardItem({
           className="absolute -bottom-2 -left-2 flex h-7 items-center gap-1 rounded-full border border-indigo-300/30 bg-indigo-950 px-2 text-[9px] font-bold text-indigo-100 opacity-100 shadow-lg transition hover:bg-indigo-900 focus:opacity-100 disabled:cursor-wait disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
         >
           <Film className="h-3 w-3" /> {item.gif ? 'Change' : 'Choose'}
+        </button>
+      )}
+
+      {item.source === 'shop' && item.itemType === 'photo_frame' && (
+        <button
+          type="button"
+          aria-label={`${item.photo ? 'Replace' : 'Upload'} photo for ${item.displayName}`}
+          title={item.photo ? 'Replace photo' : 'Upload photo'}
+          onClick={() => onEditPhoto(item.ownedItemId)}
+          disabled={saveState === 'removing'}
+          className="absolute -bottom-2 -left-2 flex h-7 items-center gap-1 rounded-full border border-amber-200/30 bg-amber-950 px-2 text-[9px] font-bold text-amber-100 opacity-100 shadow-lg transition hover:bg-amber-900 focus:opacity-100 disabled:cursor-wait disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
+        >
+          <ImagePlus className="h-3 w-3" /> {item.photo ? 'Replace' : 'Upload'}
         </button>
       )}
 

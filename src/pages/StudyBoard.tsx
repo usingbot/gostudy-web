@@ -4,10 +4,12 @@ import {LayoutGrid, RefreshCw} from 'lucide-react';
 import {
   fetchBoard,
   isGifSlotObject,
+  isPhotoFrameObject,
   isStickyNoteObject,
   moveBoardObject,
   removeBoardObject,
   updateStickyNote,
+  uploadPhotoFrameImage,
 } from '../api/board';
 import {hydrateGiphyIds, selectBoardGif} from '../api/giphy';
 import {ApiError} from '../api/productData';
@@ -16,6 +18,7 @@ import StudyBoardCanvas from '../components/StudyBoardCanvas';
 import type {BoardItemSaveState} from '../components/BoardItem';
 import GifPicker from '../components/GifPicker';
 import StickyNoteEditor from '../components/StickyNoteEditor';
+import PhotoFrameUploader from '../components/PhotoFrameUploader';
 import type {BoardGif, BoardObject, BoardPosition, ResolvedBoardGif} from '../types';
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -58,6 +61,7 @@ export default function StudyBoard() {
   const [requestVersion, setRequestVersion] = useState(0);
   const [editingOwnedItemId, setEditingOwnedItemId] = useState<string | null>(null);
   const [editingGifOwnedItemId, setEditingGifOwnedItemId] = useState<string | null>(null);
+  const [editingPhotoOwnedItemId, setEditingPhotoOwnedItemId] = useState<string | null>(null);
   const confirmedPositionsRef = useRef(new Map<string, BoardPosition>());
   const pendingPositionsRef = useRef(new Map<string, BoardPosition>());
   const savingIdsRef = useRef(new Set<string>());
@@ -232,6 +236,9 @@ export default function StudyBoard() {
   const editingGifSlot = items.find((item) => (
     isGifSlotObject(item) && item.ownedItemId === editingGifOwnedItemId
   ));
+  const editingPhotoFrame = items.find((item) => (
+    isPhotoFrameObject(item) && item.ownedItemId === editingPhotoOwnedItemId
+  ));
 
   const handleSaveStickyNote = useCallback(async (ownedItemId: string, body: string) => {
     try {
@@ -305,6 +312,28 @@ export default function StudyBoard() {
     }
   }, [items]);
 
+  const handleSavePhoto = useCallback(async (
+    ownedItemId: string,
+    file: File,
+    expectedRevision: string,
+  ): Promise<void> => {
+    try {
+      const saved = await uploadPhotoFrameImage(ownedItemId, file, expectedRevision);
+      if (mountedRef.current) {
+        setItems((currentItems) => currentItems.map((item) => (
+          isPhotoFrameObject(item) && item.ownedItemId === saved.ownedItemId
+            ? {...item, photo: saved.photo}
+            : item
+        )));
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        void refresh();
+      }
+      throw error;
+    }
+  }, [refresh]);
+
   return (
     <div className="space-y-6 pb-10">
       <div className="flex flex-col gap-4 border-b border-slate-800 pb-6 sm:flex-row sm:items-center sm:justify-between">
@@ -358,6 +387,7 @@ export default function StudyBoard() {
           onEditStickyNote={setEditingOwnedItemId}
           onEditGif={setEditingGifOwnedItemId}
           onRetryGif={(ownedItemId) => void handleRetryGif(ownedItemId)}
+          onEditPhoto={setEditingPhotoOwnedItemId}
         />
       )}
 
@@ -374,6 +404,18 @@ export default function StudyBoard() {
           slot={editingGifSlot}
           onClose={() => setEditingGifOwnedItemId(null)}
           onSave={(gif) => handleSaveGif(editingGifSlot.ownedItemId, gif)}
+        />
+      )}
+
+      {editingPhotoFrame && isPhotoFrameObject(editingPhotoFrame) && (
+        <PhotoFrameUploader
+          frame={editingPhotoFrame}
+          onClose={() => setEditingPhotoOwnedItemId(null)}
+          onSave={(file, expectedRevision) => handleSavePhoto(
+            editingPhotoFrame.ownedItemId,
+            file,
+            expectedRevision,
+          )}
         />
       )}
 

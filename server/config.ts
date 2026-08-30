@@ -4,6 +4,13 @@ import type {PoolConfig} from 'pg';
 
 type NodeEnvironment = 'development' | 'test' | 'production';
 
+export interface R2Config {
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucket: string;
+}
+
 export interface AppConfig {
   nodeEnv: NodeEnvironment;
   appUrl: URL;
@@ -17,6 +24,7 @@ export interface AppConfig {
   sessionSecret: string;
   sessionTtlSeconds: number;
   trustProxy: boolean | number | string;
+  r2?: R2Config | null;
 }
 
 function readRequired(name: string): string {
@@ -89,6 +97,37 @@ function readTrustProxy(): boolean | number | string {
   return value;
 }
 
+function readR2Config(): R2Config | null {
+  const names = [
+    'R2_ACCOUNT_ID',
+    'R2_ACCESS_KEY_ID',
+    'R2_SECRET_ACCESS_KEY',
+    'R2_BUCKET',
+  ] as const;
+  const values = Object.fromEntries(
+    names.map((name) => [name, process.env[name]?.trim() || '']),
+  ) as Record<(typeof names)[number], string>;
+  if (names.every((name) => values[name] === '')) {
+    return null;
+  }
+  const missing = names.filter((name) => values[name] === '');
+  if (missing.length > 0) {
+    throw new Error(`R2 configuration is incomplete: ${missing.join(', ')} required`);
+  }
+  if (!/^[0-9a-f]{32}$/.test(values.R2_ACCOUNT_ID)) {
+    throw new Error('R2_ACCOUNT_ID must be a lowercase 32-character hexadecimal account ID');
+  }
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(values.R2_BUCKET)) {
+    throw new Error('R2_BUCKET must be a canonical 3-63 character R2 bucket name');
+  }
+  return {
+    accountId: values.R2_ACCOUNT_ID,
+    accessKeyId: values.R2_ACCESS_KEY_ID,
+    secretAccessKey: values.R2_SECRET_ACCESS_KEY,
+    bucket: values.R2_BUCKET,
+  };
+}
+
 export function loadConfig(): AppConfig {
   const nodeEnv = readNodeEnvironment();
   const appUrl = readHttpUrl('APP_URL');
@@ -126,5 +165,6 @@ export function loadConfig(): AppConfig {
     sessionSecret,
     sessionTtlSeconds: readPositiveInteger('SESSION_TTL_SECONDS', 7 * 24 * 60 * 60),
     trustProxy: readTrustProxy(),
+    r2: readR2Config(),
   };
 }

@@ -28,6 +28,10 @@ interface BoardObjectRow extends QueryResultRow {
   shop_item_type: string | null;
   sticky_body: string | null;
   gif_giphy_id: string | null;
+  photo_object_key: string | null;
+  photo_width: string | number | null;
+  photo_height: string | number | null;
+  photo_revision: string | number | null;
 }
 
 interface CountRow extends QueryResultRow {
@@ -94,6 +98,7 @@ export interface ShopBoardObject extends BoardObjectBase {
   itemType: ShopObjectType;
   body?: string;
   gif?: BoardGif | null;
+  photo?: BoardPhoto | null;
 }
 
 export type BoardObject = RewardBoardObject | ShopBoardObject;
@@ -110,6 +115,15 @@ export interface StickyNoteContent {
 export interface BoardGif {
   giphyId: string;
 }
+
+export interface BoardPhoto {
+  url: string;
+  width: number;
+  height: number;
+  revision: string;
+}
+
+export type PhotoUrlSigner = (objectKey: string) => Promise<string>;
 
 export interface BoardGifSelection extends BoardGif {
   ownedItemId: string;
@@ -305,7 +319,34 @@ function mapStoredGif(row: BoardObjectRow): BoardGif | null {
   return {giphyId: row.gif_giphy_id};
 }
 
-function mapBoardObjectRow(row: BoardObjectRow): BoardObject {
+async function mapStoredPhoto(
+  row: BoardObjectRow,
+  signPhotoUrl?: PhotoUrlSigner,
+): Promise<BoardPhoto | null> {
+  if (row.photo_object_key == null) {
+    if (row.photo_width != null || row.photo_height != null || row.photo_revision != null) {
+      throw new Error('Stored Photo Frame image was incomplete');
+    }
+    return null;
+  }
+  if (row.photo_width == null || row.photo_height == null || row.photo_revision == null) {
+    throw new Error('Stored Photo Frame image was incomplete');
+  }
+  if (!signPhotoUrl) {
+    throw new Error('Photo storage is not configured');
+  }
+  return {
+    url: await signPhotoUrl(row.photo_object_key),
+    width: parseSafePositiveInteger(row.photo_width, 'photo_width'),
+    height: parseSafePositiveInteger(row.photo_height, 'photo_height'),
+    revision: parsePositiveBigint(row.photo_revision, 'photo_revision'),
+  };
+}
+
+async function mapBoardObjectRow(
+  row: BoardObjectRow,
+  signPhotoUrl?: PhotoUrlSigner,
+): Promise<BoardObject> {
   const boardObjectId = parsePositiveBigint(row.board_objectid, 'board_objectid');
   const position = parseStoredPosition(row);
   if (row.source_type === 'reward') {
@@ -352,6 +393,9 @@ function mapBoardObjectRow(row: BoardObjectRow): BoardObject {
       itemType: row.object_type,
       ...(row.object_type === 'sticky_note' ? {body: row.sticky_body ?? ''} : {}),
       ...(row.object_type === 'gif' ? {gif: mapStoredGif(row)} : {}),
+      ...(row.object_type === 'photo_frame'
+        ? {photo: await mapStoredPhoto(row, signPhotoUrl)}
+        : {}),
     };
   }
   throw new Error('Stored board source type was invalid');
@@ -408,7 +452,11 @@ async function lockBoardAndCheckCapacity(client: PoolClient, discordUserId: stri
   }
 }
 
-export async function getBoardItems(pool: Pool, discordUserId: string): Promise<BoardObject[]> {
+export async function getBoardItems(
+  pool: Pool,
+  discordUserId: string,
+  signPhotoUrl?: PhotoUrlSigner,
+): Promise<BoardObject[]> {
   const result = await pool.query<BoardObjectRow>(
     `SELECT board_object.board_objectid,
             board_object.source_type,
@@ -429,7 +477,11 @@ export async function getBoardItems(pool: Pool, discordUserId: string): Promise<
             shop_catalog.display_name AS shop_display_name,
             shop_catalog.item_type AS shop_item_type,
             sticky_note.body AS sticky_body,
-            board_gif.giphy_id AS gif_giphy_id
+            board_gif.giphy_id AS gif_giphy_id,
+            photo_frame.object_key AS photo_object_key,
+            photo_frame.width AS photo_width,
+            photo_frame.height AS photo_height,
+            photo_frame.revision AS photo_revision
        FROM public.web_study_board_objects AS board_object
        LEFT JOIN public.gostudy_user_inventory AS reward_inventory
          ON board_object.source_type = 'reward'
@@ -449,6 +501,9 @@ export async function getBoardItems(pool: Pool, discordUserId: string): Promise<
        LEFT JOIN public.web_board_gifs AS board_gif
          ON board_gif.owned_itemid = owned_item.owned_itemid
         AND board_gif.userid = board_object.userid
+       LEFT JOIN public.web_photo_frames AS photo_frame
+         ON photo_frame.owned_itemid = owned_item.owned_itemid
+        AND photo_frame.userid = board_object.userid
       WHERE board_object.userid = $1::bigint
         AND (
           (board_object.source_type = 'reward'
@@ -462,7 +517,7 @@ export async function getBoardItems(pool: Pool, discordUserId: string): Promise<
       ORDER BY board_object.created_at ASC, board_object.board_objectid ASC`,
     [discordUserId],
   );
-  return result.rows.map(mapBoardObjectRow);
+  return Promise.all(result.rows.map((row) => mapBoardObjectRow(row, signPhotoUrl)));
 }
 
 export async function createBoardItem(
@@ -549,7 +604,7 @@ export async function createBoardItem(
     if (insertResult.rows.length === 0) {
       throw new BoardItemNotOwnedError('Inventory ownership changed during placement');
     }
-    const item = mapBoardObjectRow(insertResult.rows[0]);
+    const item = await mapBoardObjectRow(insertResult.rows[0]);
     if (item.source !== 'reward') {
       throw new Error('Reward placement returned a shop object');
     }
@@ -574,6 +629,7 @@ export async function createShopBoardItem(
   pool: Pool,
   discordUserId: string,
   input: ShopBoardPlacementInput,
+  signPhotoUrl?: PhotoUrlSigner,
 ): Promise<ShopBoardObject> {
   const client = await pool.connect();
   try {
@@ -591,7 +647,10 @@ export async function createShopBoardItem(
       throw new BoardItemNotOwnedError('Owned board item was not found for the current user');
     }
     const itemType = ownership.rows[0].item_type;
-    if (itemType !== 'sticky_note' && itemType !== 'decoration' && itemType !== 'gif') {
+    if (itemType !== 'sticky_note'
+      && itemType !== 'decoration'
+      && itemType !== 'gif'
+      && itemType !== 'photo_frame') {
       throw new BoardItemUnsupportedError('Owned board item is not placeable in this chapter');
     }
     const duplicate = await client.query(
@@ -615,7 +674,7 @@ export async function createShopBoardItem(
              ON catalog.item_key = owned.item_key
           WHERE owned.owned_itemid = $2::bigint
             AND owned.userid = $1::bigint
-            AND catalog.item_type IN ('sticky_note', 'decoration', 'gif')
+            AND catalog.item_type IN ('sticky_note', 'decoration', 'gif', 'photo_frame')
        ), inserted_object AS (
          INSERT INTO public.web_study_board_objects (
            userid, source_type, owned_itemid, object_type, x, y
@@ -639,7 +698,11 @@ export async function createShopBoardItem(
               owned_shop_item.display_name AS shop_display_name,
               owned_shop_item.item_type AS shop_item_type,
               COALESCE(sticky_note.body, '') AS sticky_body,
-              board_gif.giphy_id AS gif_giphy_id
+              board_gif.giphy_id AS gif_giphy_id,
+              photo_frame.object_key AS photo_object_key,
+              photo_frame.width AS photo_width,
+              photo_frame.height AS photo_height,
+              photo_frame.revision AS photo_revision
          FROM inserted_object
          JOIN owned_shop_item USING (owned_itemid)
          LEFT JOIN public.web_sticky_notes AS sticky_note
@@ -647,13 +710,16 @@ export async function createShopBoardItem(
           AND sticky_note.userid = $1::bigint
          LEFT JOIN public.web_board_gifs AS board_gif
            ON board_gif.owned_itemid = inserted_object.owned_itemid
-          AND board_gif.userid = $1::bigint`,
+          AND board_gif.userid = $1::bigint
+         LEFT JOIN public.web_photo_frames AS photo_frame
+           ON photo_frame.owned_itemid = inserted_object.owned_itemid
+          AND photo_frame.userid = $1::bigint`,
       [discordUserId, input.ownedItemId, input.x, input.y],
     );
     if (insertResult.rows.length === 0) {
       throw new BoardItemNotOwnedError('Owned item changed during placement');
     }
-    const item = mapBoardObjectRow(insertResult.rows[0]);
+    const item = await mapBoardObjectRow(insertResult.rows[0], signPhotoUrl);
     if (item.source !== 'shop') {
       throw new Error('Shop placement returned a reward object');
     }

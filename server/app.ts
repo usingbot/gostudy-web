@@ -1,4 +1,4 @@
-import {randomBytes, timingSafeEqual} from 'node:crypto';
+import {randomBytes, randomUUID, timingSafeEqual} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
 import connectPgSimple from 'connect-pg-simple';
@@ -84,6 +84,27 @@ import {
   purchaseBoardShopItem,
 } from './shop-data.js';
 import {parseShopPurchaseBody, ShopValidationError} from './shop-validation.js';
+import {
+  assertPhotoFrameOwned,
+  PhotoFrameNotOwnedError,
+  PhotoFrameWrongTypeError,
+  replacePhotoFrameImage,
+} from './photo-frame-data.js';
+import {
+  normalizePhotoFrameImage,
+  PhotoImageValidationError,
+} from './photo-image.js';
+import {
+  createR2PhotoStorage,
+  getR2Origin,
+  type PhotoStorage,
+  PhotoStorageError,
+} from './photo-storage.js';
+import {
+  parseExpectedPhotoRevision,
+  parseSinglePhotoUpload,
+  PhotoUploadValidationError,
+} from './photo-upload.js';
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
 const DEFAULT_RETURN_TO = '/dashboard';
@@ -100,6 +121,8 @@ type AllowedReturnTo = '/dashboard' | '/inventory' | '/shop' | '/board' | '/sett
 
 export interface CreateAppOptions {
   sessionStore?: session.Store;
+  photoStorage?: PhotoStorage | null;
+  normalizePhoto?: typeof normalizePhotoFrameImage;
 }
 
 function asyncHandler(
@@ -201,6 +224,15 @@ export function createApp(
   const app = express();
   const PgSessionStore = connectPgSimple(session);
   const secureCookie = config.nodeEnv === 'production';
+  const photoStorage = options.photoStorage === undefined
+    ? config.r2 ? createR2PhotoStorage(config.r2) : null
+    : options.photoStorage;
+  const normalizePhoto = options.normalizePhoto ?? normalizePhotoFrameImage;
+  const signPhotoUrl = photoStorage
+    ? (objectKey: string) => photoStorage.signReadUrl(objectKey)
+    : async () => {
+      throw new PhotoStorageError('sign');
+    };
 
   app.disable('x-powered-by');
   app.set('query parser', 'simple');
@@ -214,6 +246,7 @@ export function createApp(
           'https://cdn.discordapp.com',
           'https://giphy.com',
           'https://*.giphy.com',
+          ...(config.r2 ? [getR2Origin(config.r2.accountId)] : []),
         ],
         connectSrc: ["'self'", 'https://api.giphy.com'],
       },
@@ -580,7 +613,11 @@ export function createApp(
   );
 
   app.get('/api/board', asyncHandler(async (_request, response) => {
-    response.json({items: await getBoardItems(pool, getAuthenticatedUserId(response))});
+    response.json({items: await getBoardItems(
+      pool,
+      getAuthenticatedUserId(response),
+      signPhotoUrl,
+    )});
   }));
 
   app.post(
@@ -628,7 +665,12 @@ export function createApp(
     asyncHandler(async (request, response) => {
       try {
         const input = parseShopBoardPlacementBody(request.body);
-        const item = await createShopBoardItem(pool, getAuthenticatedUserId(response), input);
+        const item = await createShopBoardItem(
+          pool,
+          getAuthenticatedUserId(response),
+          input,
+          signPhotoUrl,
+        );
         response.status(201).json(item);
       } catch (error) {
         if (error instanceof BoardValidationError) {
@@ -742,6 +784,146 @@ export function createApp(
         }
         if (code === '22023' || code === '23514') {
           response.status(400).json({error: 'Invalid Sticky Note body'});
+          return;
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.put(
+    '/api/board/photo-frames/:ownedItemId/image',
+    requireAppOrigin(config.appUrl.origin),
+    asyncHandler(async (request, response) => {
+      try {
+        if (!request.is('multipart/form-data')) {
+          response.status(415).json({
+            error: 'multipart/form-data is required',
+            code: 'PHOTO_MULTIPART_REQUIRED',
+          });
+          return;
+        }
+        const ownedItemId = parseOwnedItemId(request.params.ownedItemId);
+        const expectedRevision = parseExpectedPhotoRevision(
+          request.get('X-Photo-Revision'),
+        );
+        const userId = getAuthenticatedUserId(response);
+
+        // Reject foreign and wrong-type items before buffering or decoding bytes.
+        await assertPhotoFrameOwned(pool, userId, ownedItemId);
+        if (!photoStorage) {
+          response.status(503).json({
+            error: 'Photo storage is unavailable',
+            code: 'PHOTO_STORAGE_UNAVAILABLE',
+          });
+          return;
+        }
+
+        const upload = await parseSinglePhotoUpload(request);
+        if (upload.expectedRevision !== expectedRevision) {
+          throw new PhotoUploadValidationError(
+            'Photo revision changed while parsing',
+            'INVALID_REVISION',
+          );
+        }
+        const photo = await normalizePhoto(upload.bytes);
+        const newObjectKey = `photo-frames/${ownedItemId}/${randomUUID()}.webp`;
+
+        try {
+          await photoStorage.putSanitizedImage(newObjectKey, photo);
+        } catch (error) {
+          if (error instanceof PhotoStorageError) {
+            response.status(503).json({
+              error: 'Photo storage is unavailable',
+              code: 'PHOTO_STORAGE_UNAVAILABLE',
+            });
+            return;
+          }
+          throw error;
+        }
+
+        let replaced;
+        try {
+          replaced = await replacePhotoFrameImage(
+            pool,
+            userId,
+            ownedItemId,
+            newObjectKey,
+            photo,
+            expectedRevision,
+          );
+        } catch (error) {
+          try {
+            await photoStorage.deleteObject(newObjectKey);
+          } catch {
+            console.warn('Photo Frame cleanup of a new unreferenced object failed');
+          }
+          const code = databaseErrorCode(error);
+          if (code === 'GSP03') {
+            response.status(409).json({
+              error: 'Photo Frame image changed; reload before replacing it',
+              code: 'PHOTO_REVISION_CONFLICT',
+            });
+            return;
+          }
+          if (code === 'GSP01') {
+            response.status(404).json({error: 'Photo Frame not found', code: 'PHOTO_FRAME_NOT_FOUND'});
+            return;
+          }
+          if (code === 'GSP02') {
+            response.status(409).json({error: 'Owned item is not a Photo Frame', code: 'BOARD_ITEM_NOT_PHOTO_FRAME'});
+            return;
+          }
+          throw error;
+        }
+
+        if (replaced.oldObjectKey) {
+          try {
+            await photoStorage.deleteObject(replaced.oldObjectKey);
+          } catch {
+            console.warn('Photo Frame cleanup of a replaced object failed');
+          }
+        }
+
+        const url = await photoStorage.signReadUrl(replaced.objectKey);
+        response.json({
+          ownedItemId: replaced.ownedItemId,
+          photo: {
+            url,
+            width: replaced.width,
+            height: replaced.height,
+            revision: replaced.revision,
+          },
+        });
+      } catch (error) {
+        if (error instanceof BoardValidationError
+          || (error instanceof PhotoUploadValidationError
+            && error.code === 'INVALID_REVISION')) {
+          response.status(400).json({error: 'Invalid Photo Frame upload', code: 'INVALID_PHOTO_UPLOAD'});
+          return;
+        }
+        if (error instanceof PhotoUploadValidationError) {
+          const status = error.code === 'FILE_TOO_LARGE' ? 413 : 400;
+          response.status(status).json({
+            error: error.code === 'FILE_TOO_LARGE' ? 'Photo must not exceed 5 MiB' : 'Invalid multipart upload',
+            code: error.code === 'FILE_TOO_LARGE' ? 'PHOTO_TOO_LARGE' : 'INVALID_PHOTO_UPLOAD',
+          });
+          return;
+        }
+        if (error instanceof PhotoImageValidationError) {
+          response.status(400).json({error: 'Image is invalid or unsupported', code: 'INVALID_PHOTO_IMAGE'});
+          return;
+        }
+        if (error instanceof PhotoFrameNotOwnedError) {
+          response.status(404).json({error: 'Photo Frame not found', code: 'PHOTO_FRAME_NOT_FOUND'});
+          return;
+        }
+        if (error instanceof PhotoFrameWrongTypeError) {
+          response.status(409).json({error: 'Owned item is not a Photo Frame', code: 'BOARD_ITEM_NOT_PHOTO_FRAME'});
+          return;
+        }
+        if (error instanceof PhotoStorageError) {
+          response.status(503).json({error: 'Photo storage is unavailable', code: 'PHOTO_STORAGE_UNAVAILABLE'});
           return;
         }
         throw error;
@@ -877,6 +1059,13 @@ export function createApp(
     }
     if (bodyError.status === 400 && bodyError.type === 'entity.parse.failed') {
       response.status(400).json({error: 'Invalid JSON body'});
+      return;
+    }
+    if (error instanceof PhotoStorageError) {
+      response.status(503).json({
+        error: 'Photo storage is unavailable',
+        code: 'PHOTO_STORAGE_UNAVAILABLE',
+      });
       return;
     }
     console.error(`Request failed: ${request.method} ${request.path}`);

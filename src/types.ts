@@ -93,6 +93,7 @@ export interface ShopBoardObject extends BoardObjectBase {
   itemType: BoardShopItemType;
   body?: string;
   gif?: BoardGif | null;
+  photo?: BoardPhoto | null;
 }
 
 export type BoardObject = RewardBoardObject | ShopBoardObject;
@@ -128,6 +129,18 @@ export interface ResolvedBoardGif extends BoardGif {
 export interface BoardGifSelection {
   ownedItemId: string;
   giphyId: string;
+}
+
+export interface BoardPhoto {
+  url: string;
+  width: number;
+  height: number;
+  revision: string;
+}
+
+export interface PhotoFrameImageResult {
+  ownedItemId: string;
+  photo: BoardPhoto;
 }
 
 export interface GiphySearchPage {

@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {Backpack, Check, Clock3, LoaderCircle, Plus} from 'lucide-react';
+import {Backpack, Check, LoaderCircle, Plus} from 'lucide-react';
 import {motion} from 'motion/react';
 
 import {addBoardItem, addShopBoardItem, fetchBoard} from '../api/board';
@@ -171,7 +171,8 @@ export default function Inventory() {
     if (placingItemId
       || (item.itemType !== 'sticky_note'
         && item.itemType !== 'decoration'
-        && item.itemType !== 'gif')) {
+        && item.itemType !== 'gif'
+        && item.itemType !== 'photo_frame')) {
       return;
     }
     const position = findFirstFreePosition(boardItems);
@@ -284,7 +285,8 @@ export default function Inventory() {
                     <span className="mt-2 text-[10px] text-slate-600">Acquired {formatEarnedAt(item.acquiredAt)}</span>
                     {item.itemType === 'sticky_note'
                       || item.itemType === 'decoration'
-                      || item.itemType === 'gif' ? (
+                      || item.itemType === 'gif'
+                      || item.itemType === 'photo_frame' ? (
                       <button
                         type="button"
                         onClick={() => void handleAddShopItemToBoard(item)}
@@ -303,11 +305,7 @@ export default function Inventory() {
                           <><Plus className="h-3.5 w-3.5" /> Add to Board</>
                         )}
                       </button>
-                    ) : (
-                      <div className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-xs font-semibold text-slate-500" aria-disabled="true">
-                        <Clock3 className="h-3.5 w-3.5" /> Photo Frame support coming next
-                      </div>
-                    )}
+                    ) : null}
                   </motion.article>
                 ))}
               </motion.div>

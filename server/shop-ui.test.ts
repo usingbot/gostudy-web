@@ -29,12 +29,12 @@ test('buy flow confirms, disables duplicate submit, and retains request ID for s
   assert.doesNotMatch(shop, /chalkBalance\s*[-+]/);
 });
 
-test('Inventory preserves reward placement, enables GIF Slots, and stages Photo Frames', async () => {
+test('Inventory preserves reward placement and enables GIF Slots and Photo Frames', async () => {
   const inventory = await readFile('src/pages/Inventory.tsx', 'utf8');
   assert.match(inventory, /items\.map/);
   assert.match(inventory, /shopItems\.map/);
   assert.match(inventory, /Add to Board/);
   assert.match(inventory, /item\.itemType === 'gif'/);
-  assert.match(inventory, /Photo Frame support coming next/);
-  assert.match(inventory, /aria-disabled="true"/);
+  assert.match(inventory, /item\.itemType === 'photo_frame'/);
+  assert.doesNotMatch(inventory, /Photo Frame support coming next/);
 });

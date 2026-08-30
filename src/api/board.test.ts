@@ -6,6 +6,7 @@ import {
   addShopBoardItem,
   moveBoardObject,
   removeBoardObject,
+  uploadPhotoFrameImage,
   updateStickyNote,
 } from './board.js';
 
@@ -30,6 +31,37 @@ test('board client uses distinct reward/shop placement bodies and never sends fo
   assert.equal(calls[1].input, '/api/board/owned-items');
   assert.equal(calls[1].init?.body, JSON.stringify({ownedItemId: '9223372036854775806', x: 1, y: 0}));
   assert.doesNotMatch(String(calls[1].init?.body), /userid|objectType|itemType|chalk|price/i);
+});
+
+test('Photo Frame client sends one multipart image and revision without forged identity or key', async () => {
+  const originalFetch = globalThis.fetch;
+  let call: {input: string; init?: RequestInit} | null = null;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    call = {input: String(input), init};
+    return new Response(JSON.stringify({
+      ownedItemId: '77',
+      photo: {url: 'https://r2.invalid/signed', width: 10, height: 10, revision: '2'},
+    }), {status: 200, headers: {'Content-Type': 'application/json'}});
+  }) as typeof fetch;
+  try {
+    await uploadPhotoFrameImage(
+      '77',
+      new File([new Uint8Array([1, 2, 3])], 'not-persisted.png', {type: 'image/png'}),
+      '1',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert(call);
+  const captured = call as {input: string; init?: RequestInit};
+  assert.equal(captured.input, '/api/board/photo-frames/77/image');
+  assert.equal(captured.init?.method, 'PUT');
+  assert(captured.init?.body instanceof FormData);
+  assert.equal(captured.init?.headers && (captured.init.headers as Record<string, string>)['X-Photo-Revision'], '1');
+  assert.equal(captured.init?.headers && (captured.init.headers as Record<string, string>)['Content-Type'], undefined);
+  const form = captured.init?.body as FormData;
+  assert.deepEqual([...form.keys()], ['image']);
+  assert.doesNotMatch(String(form), /userid|objectKey|photo-frames/);
 });
 
 test('one drag release call produces one generic PATCH with normalized position', async () => {

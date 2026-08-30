@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 
-test('Inventory offers GIF Slot placement and leaves only Photo Frame pending', async () => {
+test('Inventory offers GIF Slot and Photo Frame placement', async () => {
   const inventory = await readFile('src/pages/Inventory.tsx', 'utf8');
   assert.match(inventory, /item\.itemType !== 'gif'/);
   assert.match(inventory, /item\.itemType === 'gif'/);
@@ -10,10 +10,30 @@ test('Inventory offers GIF Slot placement and leaves only Photo Frame pending', 
   assert.match(inventory, /placedShopItemIds\.has\(item\.ownedItemId\)/);
   assert.match(inventory, /<Check[\s\S]*On Board/);
   assert.match(inventory, /<Plus[\s\S]*Add to Board/);
-  assert.match(inventory, /Photo Frame support coming next/);
-  assert.match(inventory, /aria-disabled="true"/);
+  assert.match(inventory, /item\.itemType !== 'photo_frame'/);
+  assert.match(inventory, /item\.itemType === 'photo_frame'/);
+  assert.doesNotMatch(inventory, /Photo Frame support coming next/);
   assert.match(inventory, /placedRewardIds/);
   assert.match(inventory, /addBoardItem\(item\.hourRewardId, position\)/);
+});
+
+test('Photo Frame board UI renders empty/configured states and secure upload controls', async () => {
+  const [item, board, uploader] = await Promise.all([
+    readFile('src/components/BoardItem.tsx', 'utf8'),
+    readFile('src/pages/StudyBoard.tsx', 'utf8'),
+    readFile('src/components/PhotoFrameUploader.tsx', 'utf8'),
+  ]);
+  assert.match(item, /item\.itemType === 'photo_frame'/);
+  assert.match(item, /Upload photo/);
+  assert.match(item, /Replace/);
+  assert.match(item, /alt={`Photo in \$\{item\.displayName\}`}/);
+  assert.match(item, /pointer-events-none/);
+  assert.match(board, /uploadPhotoFrameImage\(ownedItemId, file, expectedRevision\)/);
+  assert.match(uploader, /type="file"/);
+  assert.match(uploader, /image\/jpeg,image\/png,image\/webp/);
+  assert.match(uploader, /Maximum 5 MB/);
+  assert.match(uploader, /Processing securely…/);
+  assert.doesNotMatch(`${item}\n${board}\n${uploader}`, /dangerouslySetInnerHTML|type="url"/);
 });
 
 test('Study Board renders note text literally with an editor and no HTML injection path', async () => {

@@ -8,7 +8,7 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0007_create_board_gifs.sql` require StudyLion schema v20; deploy each migration before its matching application build.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20; deploy each migration before its matching application build.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
@@ -36,11 +36,12 @@ The `gostudy_web` role receives only `SELECT` and `INSERT` on `public.web_reward
 
 - `GET /api/board` returns generic board objects as a `source: "reward" | "shop"` discriminated union. Every placement has a string `boardObjectId`; reward and owned-item BIGINT IDs also remain strings.
 - `POST /api/board/items` retains the legacy reward placement body `{hourRewardId,x,y}`.
-- `POST /api/board/owned-items` places one owned Sticky Note, Basic Decoration, or GIF Slot using the strict body `{ownedItemId,x,y}`. Photo Frame remains unplaceable.
+- `POST /api/board/owned-items` places one owned Sticky Note, Basic Decoration, GIF Slot, or Photo Frame using the strict body `{ownedItemId,x,y}`.
 - `PATCH /api/board/objects/:boardObjectId` saves normalized coordinates for either source type.
 - `DELETE /api/board/objects/:boardObjectId` idempotently removes only the placement.
 - `PATCH /api/board/sticky-notes/:ownedItemId` saves a strict `{body}` plain-text note. Empty notes are allowed.
 - `PUT /api/board/gifs/:ownedItemId` accepts only `{giphyId}`, validates canonical syntax and exact owned `gif-slot` identity, and persists that ID without contacting GIPHY.
+- `PUT /api/board/photo-frames/:ownedItemId/image` accepts `multipart/form-data` containing exactly one `image` file and requires `X-Photo-Revision: <nonnegative BIGINT>`. Use `0` for a frame with no image and the current response revision for replacement.
 - `PATCH` and `DELETE /api/board/items/:hourRewardId` remain as reward-only compatibility routes.
 
 Board writes require the request `Origin` to match `APP_URL`; JSON writes also require `application/json` and use a 16 KiB parser limit. User identity and catalog type come only from the session and database. The browser cannot choose `userid`, `object_type`, an arbitrary asset URL, or a Chalk mutation. A board can contain at most 100 objects across reward and Shop sources; placement serializes on the user's board row before counting.
@@ -123,7 +124,7 @@ TO gostudy_web_owner;
 
 Do not make `gostudy_web` a member of `gostudy_web_owner` or `gostudy_chalk_owner`, and do not grant `gostudy_web` direct execution of `gostudy_purchase_board_item_chalk`. Keep the app unavailable to purchase traffic until the ownership transfer and owner-only wrapper grant are complete.
 
-Inventory returns legacy study rewards in `items` and purchased board instances in `shopItems`. Legacy rewards keep their existing Add to Board behavior. Sticky Note, Basic Decoration, and GIF Slot instances show Add to Board or On Board; Photo Frame continues to show its pending state. Adding, removing, or re-adding an owned item never invokes the purchase function and never spends or refunds Chalk.
+Inventory returns legacy study rewards in `items` and purchased board instances in `shopItems`. Legacy rewards keep their existing Add to Board behavior. Sticky Note, Basic Decoration, GIF Slot, and Photo Frame instances show Add to Board or On Board. Adding, removing, or re-adding an owned item never invokes the purchase function and never spends or refunds Chalk.
 
 Disposable v20 coverage lives in `tests/integration/chapter3b_v20_setup.sql` and `tests/integration/chapter3b_board_shop.sql`. Load StudyLion schema v20 and web migrations 0001–0004 into a throwaway database, run the setup, apply migration 0005, and then run the Shop integration file. Never run this sequence against `lion_data`.
 
@@ -180,6 +181,56 @@ ALTER FUNCTION public.web_upsert_board_gif(
 Do not make `gostudy_web` a member of `gostudy_web_owner`, and do not grant it direct mutation on `web_board_gifs`. Keep GIF traffic paused until migration 0007, the ownership transfer, and the dedicated `VITE_GIPHY_API_KEY` Web key are configured in the frontend build environment.
 
 Disposable Chapter 5 coverage lives in `tests/integration/chapter5_board_gifs.sql`. Starting from StudyLion schema v20, load `chapter3b_v20_setup.sql`, apply migrations 0001–0007, and run that assertion file. It proves empty-slot behavior, identity-only persistence, cross-user/type rejection, runtime privileges, definer ownership, no Chalk mutation, and selected-GIF persistence through remove/re-add. Never run this sequence against `lion_data`.
+
+## Photo Frames, private R2, and migration 0009
+
+Photo Frame storage uses a private Cloudflare R2 bucket through its S3-compatible API. Configure all four server-only variables in the Express environment; none may use a `VITE_` prefix:
+
+```dotenv
+R2_ACCOUNT_ID=replace-with-lowercase-32-character-account-id
+R2_ACCESS_KEY_ID=replace-with-r2-access-key-id
+R2_SECRET_ACCESS_KEY=replace-with-r2-secret-access-key
+R2_BUCKET=replace-with-private-photo-frame-bucket
+```
+
+Create a dedicated R2 bucket and leave public access disabled. Create a narrow R2 API token with Object Read & Write permission scoped only to that bucket. Do not reuse an account-wide token. The server endpoint is `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` with region `auto`; Helmet adds that exact configured origin to `img-src`, not an R2 wildcard.
+
+Image bytes travel from the authenticated browser to Express and then to R2; the browser never receives R2 credentials or permission to choose a storage key. The multipart route accepts exactly one `image` file, limits it to 5 MiB while streaming, and ignores the untrusted filename, extension, and browser media type. Sharp actually decodes only JPEG, PNG, or WebP with a 24-megapixel input limit, rejects animation and unsupported/corrupt input, applies source orientation, strips EXIF and other metadata, resizes within 1600×1600 without enlargement, and emits only quality-85 WebP. Original bytes and filenames are never retained. The normalized output also has a 5 MiB bound and a recorded SHA-256 digest.
+
+R2 keys have the generated form `photo-frames/<ownedItemId>/<random-uuid>.webp`; Discord user IDs are not used in paths. `server/photo-storage.ts` owns put, delete, and short-lived (30-minute) signed GET operations. The bucket stays private, signed URLs are ephemeral bearer access returned only for the current board read, and signed URLs are never stored in PostgreSQL. The browser loads the image directly from R2; Go Study does not proxy downloads.
+
+Migration 0009 creates one `web_photo_frames` row per independently owned Photo Frame. The table binds state to `web_owned_board_items` with `ON DELETE RESTRICT`, independently validates exact `photo-frame` ownership, constrains generated keys, dimensions, byte size, digest, and positive revision, and has no foreign key to StudyLion-owned tables. The runtime role can select state but cannot mutate it directly. `web_replace_photo_frame_image` is the only write path: expected revision `0` inserts revision `1`; a matching positive revision replaces and increments it; a stale revision fails without mutation.
+
+Replacement consistency is ordered as follows: normalize, upload the new generated object, call the revision-safe database function, best-effort delete the new object if the DB mutation fails, then best-effort delete the old object only after DB success. Failure to delete the old object leaves an orphan for later cleanup but never rolls back the successful user-visible replacement. Rapid replacements therefore cannot silently let an older revision overwrite newer state.
+
+Removing a Photo Frame from the Study Board deletes only `web_study_board_objects` placement. It does not delete the purchase, owned item, `web_photo_frames` state, or R2 image. Re-adding the same `ownedItemId` restores the same stored image with a fresh signed URL. Uploading or replacing an image never calls the Shop purchase function and costs no Chalk.
+
+### Deploying migration 0009
+
+Do not execute deployment from a development validation session. The reviewed production sequence is:
+
+1. Create a private R2 bucket with public access disabled.
+2. Create bucket-scoped Object Read & Write credentials.
+3. Configure the four server-only `R2_*` environment variables.
+4. Back up `lion_data` using the established StudyLion procedure.
+5. Apply `migrations/0009_create_photo_frames.sql` with a controlled deployment role.
+6. Transfer the new table and functions to the existing `gostudy_web_owner` NOLOGIN role:
+
+   ```sql
+   ALTER TABLE public.web_photo_frames OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_validate_photo_frame_owner()
+     OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_replace_photo_frame_image(
+     bigint, bigint, text, integer, integer, bigint, text, bigint
+   ) OWNER TO gostudy_web_owner;
+   ```
+
+7. Verify that `gostudy_web` has only table `SELECT` plus execution of the narrow replacement function, has no direct table mutation, and is not a member of `gostudy_web_owner`.
+8. Build the application.
+9. Perform a live JPEG/PNG/WebP upload, refresh, replace, remove, and re-add smoke test against the private bucket.
+10. Commit only after code, migration, permissions, and smoke-test review.
+
+Disposable Chapter 6 coverage lives in `tests/integration/chapter6_photo_frames.sql`. Start from StudyLion schema v20, run `chapter3b_v20_setup.sql`, apply web migrations 0001–0009, transfer ownership as the assertion script does, and run the Chapter 6 assertions. It tests exact ownership/type boundaries, constraints, revision conflicts, least privilege, no Chalk mutation, and placement removal/re-add persistence. Never run the migration or integration script against `lion_data` during validation. Unit and route tests mock storage and require no real R2 credentials.
 
 ## Production
 

@@ -4,6 +4,7 @@ import type {
   BoardObject,
   BoardPosition,
   BoardPositionResult,
+  PhotoFrameImageResult,
   RewardBoardObject,
   ShopBoardObject,
   StickyNoteContent,
@@ -137,4 +138,36 @@ export function isGifSlotObject(item: BoardObject): item is ShopBoardObject & {
   gif: ShopBoardObject['gif'];
 } {
   return item.source === 'shop' && item.itemType === 'gif';
+}
+
+export function isPhotoFrameObject(item: BoardObject): item is ShopBoardObject & {
+  itemType: 'photo_frame';
+  photo: ShopBoardObject['photo'];
+} {
+  return item.source === 'shop' && item.itemType === 'photo_frame';
+}
+
+export async function uploadPhotoFrameImage(
+  ownedItemId: string,
+  file: File,
+  expectedRevision: string,
+): Promise<PhotoFrameImageResult> {
+  const body = new FormData();
+  body.append('image', file);
+  const response = await fetch(
+    `/api/board/photo-frames/${encodeURIComponent(ownedItemId)}/image`,
+    {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'X-Photo-Revision': expectedRevision,
+      },
+      body,
+    },
+  );
+  if (!response.ok) {
+    throw await readApiError(response);
+  }
+  return response.json() as Promise<PhotoFrameImageResult>;
 }

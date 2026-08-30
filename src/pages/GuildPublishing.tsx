@@ -16,6 +16,7 @@ import {
   saveGuildPublication,
 } from '../api/guildPublishing';
 import type {ManageableGuild} from '../types';
+import DiscordGuildIcon from '../components/DiscordGuildIcon';
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const INVITE_PATTERN = /^https:\/\/(?:discord\.gg\/|discord\.com\/invite\/)[A-Za-z0-9-]{2,64}$/;
@@ -40,22 +41,6 @@ function validateForm(slug: string, invite: string, tags: string[]): string | nu
     return 'Tags must be unique, ignoring letter case.';
   }
   return null;
-}
-
-function GuildIcon({guild}: {guild: ManageableGuild}) {
-  const fallback = guild.name.trim().slice(0, 2).toUpperCase() || 'GS';
-  return (
-    <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-700 font-bold text-white shadow-lg shadow-indigo-950/30">
-      <span aria-hidden="true">{fallback}</span>
-      {guild.iconUrl && (
-        <img
-          src={guild.iconUrl}
-          alt={`${guild.name} icon`}
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-      )}
-    </div>
-  );
 }
 
 function GuildEditor({
@@ -124,7 +109,7 @@ function GuildEditor({
           <img src={guild.bannerUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-30" />
         )}
         <div className="relative flex items-center gap-4">
-          <GuildIcon guild={guild} />
+          <DiscordGuildIcon guild={guild} size="compact" />
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Publication settings</p>
             <h2 className="mt-1 text-xl font-bold">{guild.name}</h2>
@@ -307,7 +292,7 @@ export default function GuildPublishing() {
                 className={`rounded-2xl border p-4 transition ${selectedGuildId === guild.guildid ? 'border-indigo-500/60 bg-indigo-500/10' : 'border-slate-800 bg-[#18181b]'}`}
               >
                 <div className="flex items-center gap-4">
-                  <GuildIcon guild={guild} />
+                  <DiscordGuildIcon guild={guild} size="compact" />
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate font-semibold">{guild.name}</h2>
                     <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">

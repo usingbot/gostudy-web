@@ -1,5 +1,5 @@
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
-import { Home, Backpack, Grid2X2, Settings, LogOut, ServerCog, ShieldCheck, ShoppingBag } from 'lucide-react';
+import { Home, Backpack, Compass, Grid2X2, Settings, LogOut, ServerCog, ShieldCheck, ShoppingBag } from 'lucide-react';
 import {useState} from 'react';
 import {useAuth} from '../auth/AuthProvider';
 import {shouldShowAdminNavigation} from '../auth/admin-capabilities';
@@ -25,6 +25,7 @@ export default function Layout() {
 
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: Home },
+    { name: 'Servers', path: '/servers', icon: Compass },
     { name: 'Inventory', path: '/inventory', icon: Backpack },
     { name: 'Shop', path: '/shop', icon: ShoppingBag },
     { name: 'Study Board', path: '/board', icon: Grid2X2 },
@@ -50,7 +51,8 @@ export default function Layout() {
           
           <nav className="space-y-1">
             {navItems.map((item) => {
-              const isActive = location.pathname === item.path;
+              const isActive = location.pathname === item.path
+                || (item.path === '/servers' && location.pathname.startsWith('/servers/'));
               return (
                 <Link
                   key={item.name}

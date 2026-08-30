@@ -34,8 +34,13 @@ export interface GuildSummary {
   publication: GuildPublicationSettings | null;
 }
 
-export interface PublicGuildSummary extends Omit<GuildSummary, 'active' | 'publication'> {
+export interface PublicGuildSummary {
   slug: string;
+  name: string;
+  iconUrl: string | null;
+  bannerUrl: string | null;
+  description: string | null;
+  memberCount: number | null;
   inviteUrl: string | null;
   tags: string[];
 }
@@ -204,21 +209,37 @@ export async function getPublicGuilds(pool: Pool): Promise<PublicGuildSummary[]>
       ${GUILD_GROUP_BY}
       ORDER BY lower(guild.name), guild.guildid`,
   );
-  return result.rows.map((row) => {
-    const guild = mapGuild(row);
-    if (!guild.publication) {
-      throw new Error('Public guild was missing publication settings');
-    }
-    return {
-      guildid: guild.guildid,
-      name: guild.name,
-      iconUrl: guild.iconUrl,
-      bannerUrl: guild.bannerUrl,
-      description: guild.description,
-      memberCount: guild.memberCount,
-      slug: guild.publication.slug,
-      inviteUrl: guild.publication.inviteUrl,
-      tags: guild.publication.tags,
-    };
-  });
+  return result.rows.map(mapPublicGuild);
+}
+
+function mapPublicGuild(row: GuildRow): PublicGuildSummary {
+  const guild = mapGuild(row);
+  if (!guild.publication) {
+    throw new Error('Public guild was missing publication settings');
+  }
+  return {
+    slug: guild.publication.slug,
+    name: guild.name,
+    iconUrl: guild.iconUrl,
+    bannerUrl: guild.bannerUrl,
+    description: guild.description,
+    memberCount: guild.memberCount,
+    tags: guild.publication.tags,
+    inviteUrl: guild.publication.inviteUrl,
+  };
+}
+
+export async function getPublicGuildBySlug(
+  pool: Pool,
+  slug: string,
+): Promise<PublicGuildSummary | null> {
+  const result = await pool.query<GuildRow>(
+    `${GUILD_SELECT}
+      WHERE guild.active = TRUE
+        AND publication.is_public = TRUE
+        AND publication.slug = $1::text
+      ${GUILD_GROUP_BY}`,
+    [slug],
+  );
+  return result.rows[0] ? mapPublicGuild(result.rows[0]) : null;
 }

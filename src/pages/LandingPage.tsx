@@ -4,20 +4,7 @@ import { ShieldCheck, Video, Users } from 'lucide-react';
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#09090b] text-slate-50 font-sans selection:bg-indigo-500/30">
-      {/* Nav */}
-      <nav className="flex items-center justify-between p-6 md:px-12 max-w-7xl mx-auto border-b border-slate-800">
-        <div className="text-xl font-bold tracking-tighter text-indigo-400">Go Study</div>
-        <Link 
-          to="/login" 
-          className="bg-slate-50 text-[#09090b] px-5 py-2 rounded-full font-medium text-sm hover:bg-slate-200 transition-colors"
-        >
-          Login
-        </Link>
-      </nav>
-
-      {/* Hero */}
-      <main className="max-w-7xl mx-auto px-6 py-20 flex flex-col items-center text-center">
+    <main className="max-w-7xl mx-auto px-6 py-20 flex flex-col items-center text-center">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -86,7 +73,6 @@ export default function LandingPage() {
             </p>
           </div>
         </motion.div>
-      </main>
-    </div>
+    </main>
   );
 }

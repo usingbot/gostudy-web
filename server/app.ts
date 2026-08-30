@@ -112,15 +112,19 @@ import {
 } from './guild-auth.js';
 import {
   getManageableGuilds,
+  getPublicGuildBySlug,
+  getPublicGuilds,
   upsertGuildPublication,
 } from './guild-data.js';
 import {
   GuildPublicationValidationError,
   parseGuildId,
   parseGuildPublicationBody,
+  parseGuildSlug,
 } from './guild-validation.js';
 
 const SESSION_COOKIE_NAME = 'gostudy.sid';
+const PUBLIC_DISCOVERY_CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=300';
 const DEFAULT_RETURN_TO = '/dashboard';
 const ALLOWED_RETURN_TO = new Set([
   '/dashboard',
@@ -289,6 +293,32 @@ export function createApp(
       maxAge: config.sessionTtlSeconds * 1000,
     },
   });
+
+  app.get('/api/servers', asyncHandler(async (_request, response) => {
+    response.set('Cache-Control', PUBLIC_DISCOVERY_CACHE_CONTROL);
+    response.json({servers: await getPublicGuilds(pool)});
+  }));
+
+  app.get('/api/servers/:slug', asyncHandler(async (request, response) => {
+    response.set('Cache-Control', PUBLIC_DISCOVERY_CACHE_CONTROL);
+    let slug: string;
+    try {
+      slug = parseGuildSlug(request.params.slug);
+    } catch (error) {
+      if (error instanceof GuildPublicationValidationError) {
+        response.status(404).json({error: 'SERVER_NOT_FOUND'});
+        return;
+      }
+      throw error;
+    }
+    const server = await getPublicGuildBySlug(pool, slug);
+    if (!server) {
+      response.status(404).json({error: 'SERVER_NOT_FOUND'});
+      return;
+    }
+    response.json({server});
+  }));
+
   app.use(['/api', '/auth'], sessionMiddleware);
   app.use('/api/board', (_request, response, next) => {
     response.set('Cache-Control', 'private, no-store');

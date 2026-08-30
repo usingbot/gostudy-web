@@ -194,6 +194,17 @@ export interface ManageableGuildsResponse {
   authorizationRefresh: 'next-login';
 }
 
+export interface PublicGuild {
+  slug: string;
+  name: string;
+  iconUrl: string | null;
+  bannerUrl: string | null;
+  description: string | null;
+  memberCount: number | null;
+  tags: string[];
+  inviteUrl: string | null;
+}
+
 export interface KnownDiscordIdentity {
   username: string;
   globalName: string | null;

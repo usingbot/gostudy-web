@@ -15,6 +15,9 @@ import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import AdminUserDetail from './pages/AdminUserDetail';
 import GuildPublishing from './pages/GuildPublishing';
+import PublicServers from './pages/PublicServers';
+import PublicServerDetail from './pages/PublicServerDetail';
+import PublicLayout from './components/PublicLayout';
 import RequireAuth from './auth/RequireAuth';
 import RequireAdmin from './auth/RequireAdmin';
 import RequireGuildPublishing from './auth/RequireGuildPublishing';
@@ -23,7 +26,11 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route element={<PublicLayout />}>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/servers" element={<PublicServers />} />
+          <Route path="/servers/:slug" element={<PublicServerDetail />} />
+        </Route>
         <Route path="/login" element={<LoginPage />} />
         
         <Route element={<RequireAuth />}>

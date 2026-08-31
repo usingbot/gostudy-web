@@ -28,7 +28,10 @@ import {
   getAdminUserSummary,
   getRoleAudit,
 } from './admin-data.js';
-import {createActorRateLimiter} from './admin-rate-limit.js';
+import {
+  createActorRateLimiter,
+  createGuildBoardInteractionRateLimiter,
+} from './admin-rate-limit.js';
 import {
   AdminValidationError,
   parseAdminPagination,
@@ -117,14 +120,24 @@ import {
   upsertGuildPublication,
 } from './guild-data.js';
 import {
+  addGuildBoardAsset,
+  deleteGuildBoardObject,
   expandGuildBoard,
   getAdminGuildBoard,
+  getGuildBoardAssets,
   getPublicGuildBoard,
+  reorderGuildBoardObject,
+  updateGuildBoardObject,
   upsertGuildBoardTheme,
 } from './guild-board-data.js';
 import {
   GuildBoardValidationError,
+  parseGuildBoardAssetPlacementBody,
   parseGuildBoardCapacityBody,
+  parseGuildBoardDeleteBody,
+  parseGuildBoardLayerBody,
+  parseGuildBoardObjectId,
+  parseGuildBoardObjectTransformBody,
   parseGuildBoardThemeBody,
 } from './guild-board-validation.js';
 import {
@@ -153,6 +166,8 @@ export interface CreateAppOptions {
   sessionStore?: session.Store;
   photoStorage?: PhotoStorage | null;
   normalizePhoto?: typeof normalizePhotoFrameImage;
+  adminMutationRateLimiter?: RequestHandler;
+  guildBoardInteractionRateLimiter?: RequestHandler;
 }
 
 function asyncHandler(
@@ -246,6 +261,36 @@ function getAuthenticatedUserId(response: Response): string {
   return response.locals.discordUserId as string;
 }
 
+function writeGuildBoardObjectError(error: unknown, response: Response): boolean {
+  if (error instanceof GuildPublicationValidationError
+    || error instanceof GuildBoardValidationError) {
+    response.status(400).json({error: 'INVALID_GUILD_BOARD_OBJECT'});
+    return true;
+  }
+  const code = databaseErrorCode(error);
+  if (code === 'GGB01') {
+    response.status(409).json({error: 'GUILD_BOARD_REVISION_CONFLICT'});
+    return true;
+  }
+  if (code === 'GBA01') {
+    response.status(400).json({error: 'GUILD_BOARD_ASSET_UNAVAILABLE'});
+    return true;
+  }
+  if (code === 'GBO01') {
+    response.status(404).json({error: 'GUILD_BOARD_OBJECT_NOT_FOUND'});
+    return true;
+  }
+  if (code === 'GSG01') {
+    response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+    return true;
+  }
+  if (code === '22023' || code === '23514') {
+    response.status(400).json({error: 'INVALID_GUILD_BOARD_OBJECT'});
+    return true;
+  }
+  return false;
+}
+
 export function createApp(
   config: AppConfig,
   pool: Pool,
@@ -274,6 +319,7 @@ export function createApp(
           "'self'",
           'data:',
           'https://cdn.discordapp.com',
+          'https://media.discordapp.net',
           'https://giphy.com',
           'https://*.giphy.com',
           ...(config.r2 ? [getR2Origin(config.r2.accountId)] : []),
@@ -367,7 +413,10 @@ export function createApp(
   }, requireDataAuthentication);
 
   const adminJsonParser = express.json({limit: '16kb', strict: true});
-  const adminMutationRateLimiter = createActorRateLimiter();
+  const adminMutationRateLimiter = options.adminMutationRateLimiter
+    ?? createActorRateLimiter();
+  const guildBoardInteractionRateLimiter = options.guildBoardInteractionRateLimiter
+    ?? createGuildBoardInteractionRateLimiter();
   app.use('/api/admin', (_request, response, next) => {
     response.set('Cache-Control', 'private, no-store');
     next();
@@ -426,6 +475,165 @@ export function createApp(
       throw error;
     }
   }));
+
+  app.get('/api/admin/servers/:guildid/board/assets', asyncHandler(async (request, response) => {
+    try {
+      const guildId = parseGuildId(request.params.guildid);
+      const actorUserId = getAuthenticatedUserId(response);
+      const role = await getUserRole(pool, actorUserId);
+      const manageableGuildIds = readSessionManageableGuildIds(
+        request.session.manageableGuildIds,
+      );
+      if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+        response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+        return;
+      }
+      if (!await getAdminGuildBoard(pool, guildId)) {
+        response.status(403).json({error: 'GUILD_NOT_ACTIVE'});
+        return;
+      }
+      response.json(await getGuildBoardAssets(pool, guildId));
+    } catch (error) {
+      if (error instanceof GuildPublicationValidationError) {
+        response.status(400).json({error: 'INVALID_GUILD_BOARD_REQUEST'});
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.post(
+    '/api/admin/servers/:guildid/board/objects',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    guildBoardInteractionRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const input = parseGuildBoardAssetPlacementBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        const manageableGuildIds = readSessionManageableGuildIds(
+          request.session.manageableGuildIds,
+        );
+        if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+          response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+          return;
+        }
+        response.status(201).json({
+          board: await addGuildBoardAsset(pool, guildId, actorUserId, input),
+        });
+      } catch (error) {
+        if (!writeGuildBoardObjectError(error, response)) throw error;
+      }
+    }),
+  );
+
+  app.put(
+    '/api/admin/servers/:guildid/board/objects/:objectid/transform',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    guildBoardInteractionRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const objectId = parseGuildBoardObjectId(request.params.objectid);
+        const input = parseGuildBoardObjectTransformBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        const manageableGuildIds = readSessionManageableGuildIds(
+          request.session.manageableGuildIds,
+        );
+        if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+          response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+          return;
+        }
+        response.json({
+          board: await updateGuildBoardObject(
+            pool,
+            guildId,
+            objectId,
+            actorUserId,
+            input,
+          ),
+        });
+      } catch (error) {
+        if (!writeGuildBoardObjectError(error, response)) throw error;
+      }
+    }),
+  );
+
+  app.put(
+    '/api/admin/servers/:guildid/board/objects/:objectid/layer',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    guildBoardInteractionRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const objectId = parseGuildBoardObjectId(request.params.objectid);
+        const input = parseGuildBoardLayerBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        const manageableGuildIds = readSessionManageableGuildIds(
+          request.session.manageableGuildIds,
+        );
+        if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+          response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+          return;
+        }
+        response.json({
+          board: await reorderGuildBoardObject(
+            pool,
+            guildId,
+            objectId,
+            actorUserId,
+            input,
+          ),
+        });
+      } catch (error) {
+        if (!writeGuildBoardObjectError(error, response)) throw error;
+      }
+    }),
+  );
+
+  app.delete(
+    '/api/admin/servers/:guildid/board/objects/:objectid',
+    requireAppOrigin(config.appUrl.origin),
+    requireJsonContentType,
+    guildBoardInteractionRateLimiter,
+    adminJsonParser,
+    asyncHandler(async (request, response) => {
+      try {
+        const guildId = parseGuildId(request.params.guildid);
+        const objectId = parseGuildBoardObjectId(request.params.objectid);
+        const input = parseGuildBoardDeleteBody(request.body);
+        const actorUserId = getAuthenticatedUserId(response);
+        const role = await getUserRole(pool, actorUserId);
+        const manageableGuildIds = readSessionManageableGuildIds(
+          request.session.manageableGuildIds,
+        );
+        if (!mayManageGuild(role, manageableGuildIds, guildId)) {
+          response.status(403).json({error: 'GUILD_MANAGEMENT_REQUIRED'});
+          return;
+        }
+        response.json({
+          board: await deleteGuildBoardObject(
+            pool,
+            guildId,
+            objectId,
+            actorUserId,
+            input,
+          ),
+        });
+      } catch (error) {
+        if (!writeGuildBoardObjectError(error, response)) throw error;
+      }
+    }),
+  );
 
   app.put(
     '/api/admin/servers/:guildid/board/theme',

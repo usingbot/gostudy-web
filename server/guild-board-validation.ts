@@ -27,6 +27,31 @@ export interface GuildBoardCapacityInput {
   expectedRevision: string;
 }
 
+export type GuildBoardAssetKind = 'emoji' | 'sticker';
+export type GuildBoardLayerAction = 'front' | 'back';
+
+export interface GuildBoardObjectGeometryInput {
+  x: number;
+  y: number;
+  size: number;
+  rotation: number;
+  expectedRevision: string;
+}
+
+export interface GuildBoardAssetPlacementInput extends GuildBoardObjectGeometryInput {
+  assetKind: GuildBoardAssetKind;
+  assetId: string;
+}
+
+export interface GuildBoardLayerInput {
+  action: GuildBoardLayerAction;
+  expectedRevision: string;
+}
+
+export interface GuildBoardDeleteInput {
+  expectedRevision: string;
+}
+
 export class GuildBoardValidationError extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,6 +96,65 @@ export function parseGuildBoardRevision(value: unknown): string {
   return value;
 }
 
+export function parseGuildBoardObjectId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new GuildBoardValidationError('guild board object ID was invalid');
+  }
+  let objectId: bigint;
+  try {
+    objectId = BigInt(value);
+  } catch {
+    throw new GuildBoardValidationError('guild board object ID was invalid');
+  }
+  if (objectId > MAX_SIGNED_BIGINT) {
+    throw new GuildBoardValidationError('guild board object ID exceeds PostgreSQL BIGINT');
+  }
+  return value;
+}
+
+function isGuildBoardAssetKind(value: unknown): value is GuildBoardAssetKind {
+  return value === 'emoji' || value === 'sticker';
+}
+
+function isGuildBoardCoordinate(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 0;
+}
+
+function isGuildBoardSize(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 48
+    && value <= 720;
+}
+
+function isGuildBoardRotation(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && value >= -180
+    && value <= 180
+    && Math.abs(value * 100 - Math.round(value * 100)) < 1e-8;
+}
+
+function parseGuildBoardGeometry(
+  value: Record<string, unknown>,
+): GuildBoardObjectGeometryInput {
+  if (!isGuildBoardCoordinate(value.x)
+    || !isGuildBoardCoordinate(value.y)
+    || !isGuildBoardSize(value.size)
+    || !isGuildBoardRotation(value.rotation)) {
+    throw new GuildBoardValidationError('guild board object geometry was invalid');
+  }
+  return {
+    x: value.x,
+    y: value.y,
+    size: value.size,
+    rotation: value.rotation,
+    expectedRevision: parseGuildBoardRevision(value.expectedRevision),
+  };
+}
+
 export function parseGuildBoardThemeBody(value: unknown): GuildBoardThemeInput {
   if (!isRecord(value)
     || !hasExactProperties(value, ['expectedRevision', 'theme'])
@@ -94,4 +178,63 @@ export function parseGuildBoardCapacityBody(value: unknown): GuildBoardCapacityI
     height: value.height as number,
     expectedRevision: parseGuildBoardRevision(value.expectedRevision),
   };
+}
+
+export function parseGuildBoardAssetPlacementBody(
+  value: unknown,
+): GuildBoardAssetPlacementInput {
+  if (!isRecord(value)
+    || !hasExactProperties(value, [
+      'assetId',
+      'assetKind',
+      'expectedRevision',
+      'rotation',
+      'size',
+      'x',
+      'y',
+    ])
+    || !isGuildBoardAssetKind(value.assetKind)) {
+    throw new GuildBoardValidationError('guild board asset placement body was invalid');
+  }
+  return {
+    assetKind: value.assetKind,
+    assetId: parseGuildBoardObjectId(value.assetId),
+    ...parseGuildBoardGeometry(value),
+  };
+}
+
+export function parseGuildBoardObjectTransformBody(
+  value: unknown,
+): GuildBoardObjectGeometryInput {
+  if (!isRecord(value)
+    || !hasExactProperties(value, [
+      'expectedRevision',
+      'rotation',
+      'size',
+      'x',
+      'y',
+    ])) {
+    throw new GuildBoardValidationError('guild board object transform body was invalid');
+  }
+  return parseGuildBoardGeometry(value);
+}
+
+export function parseGuildBoardLayerBody(value: unknown): GuildBoardLayerInput {
+  if (!isRecord(value)
+    || !hasExactProperties(value, ['action', 'expectedRevision'])
+    || (value.action !== 'front' && value.action !== 'back')) {
+    throw new GuildBoardValidationError('guild board object layer body was invalid');
+  }
+  return {
+    action: value.action,
+    expectedRevision: parseGuildBoardRevision(value.expectedRevision),
+  };
+}
+
+export function parseGuildBoardDeleteBody(value: unknown): GuildBoardDeleteInput {
+  if (!isRecord(value)
+    || !hasExactProperties(value, ['expectedRevision'])) {
+    throw new GuildBoardValidationError('guild board object delete body was invalid');
+  }
+  return {expectedRevision: parseGuildBoardRevision(value.expectedRevision)};
 }

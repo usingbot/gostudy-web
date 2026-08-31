@@ -12,6 +12,36 @@ export interface GuildBoardFitGeometry {
   renderedHeight: number;
 }
 
+export interface GuildBoardCssRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export function snapGuildBoardCssRect({
+  x,
+  y,
+  width,
+  height,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): GuildBoardCssRect {
+  const left = Math.round(x);
+  const top = Math.round(y);
+  const right = Math.round(x + width);
+  const bottom = Math.round(y + height);
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
 export function calculateGuildBoardFit({
   viewportWidth,
   viewportHeight,

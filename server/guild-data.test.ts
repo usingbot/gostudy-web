@@ -4,7 +4,9 @@ import test from 'node:test';
 import type {Pool} from 'pg';
 
 import {
+  discordEmojiAssetUrl,
   discordGuildAssetUrl,
+  discordStickerAssetUrl,
   getManageableGuilds,
   getPublicGuildBySlug,
   getPublicGuilds,
@@ -38,6 +40,25 @@ test('Discord assets derive from current guild metadata and animated hashes use 
     'https://cdn.discordapp.com/banners/123/abcdef.webp?size=1024',
   );
   assert.equal(discordGuildAssetUrl('icons', '123', null), null);
+});
+
+test('Discord decoration URLs preserve emoji animation and support only image-renderable sticker formats', () => {
+  assert.equal(
+    discordEmojiAssetUrl('700', false),
+    'https://cdn.discordapp.com/emojis/700.png?size=1024&quality=lossless',
+  );
+  assert.equal(
+    discordEmojiAssetUrl('700', true),
+    'https://cdn.discordapp.com/emojis/700.gif?size=1024&quality=lossless',
+  );
+  assert.equal(discordStickerAssetUrl('800', 1), 'https://cdn.discordapp.com/stickers/800.png?size=320');
+  assert.equal(discordStickerAssetUrl('800', 2), 'https://cdn.discordapp.com/stickers/800.png?size=320');
+  assert.equal(discordStickerAssetUrl('800', 3), null);
+  assert.equal(discordStickerAssetUrl('800', 4), 'https://media.discordapp.net/stickers/800.gif?size=320');
+  assert.equal(discordStickerAssetUrl('800', 0), null);
+  assert.equal(discordStickerAssetUrl('800', 99), null);
+  assert.throws(() => discordEmojiAssetUrl('https://evil.example', false), /emoji ID/);
+  assert.throws(() => discordStickerAssetUrl('0', 1), /sticker ID/);
 });
 
 test('manageable guild read joins settings and tags while filtering active authorized IDs', async () => {

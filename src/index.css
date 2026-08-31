@@ -140,7 +140,6 @@
     color: var(--board-foreground);
     box-shadow: inset 0 1px 0 var(--board-highlight), 0 24px 60px rgb(0 0 0 / 0.22);
     transform-origin: top left;
-    will-change: transform;
   }
 
   .guild-board-surface::before,
@@ -210,6 +209,136 @@
     background-color: var(--board-background);
     background-image: var(--board-pattern);
     background-size: var(--board-pattern-size);
+  }
+
+  .guild-board-object {
+    position: absolute;
+    border: 0;
+    background: transparent;
+    cursor: default;
+  }
+
+  .guild-board-shell.is-editable .guild-board-object {
+    cursor: grab;
+  }
+
+  .guild-board-shell.is-editable .guild-board-object:active {
+    cursor: grabbing;
+  }
+
+  .guild-board-object-artwork {
+    width: 100%;
+    height: 100%;
+    transform-origin: center;
+  }
+
+  .guild-board-object-artwork img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: auto;
+    pointer-events: none;
+  }
+
+  .guild-board-object.is-selected::after {
+    content: '';
+    position: absolute;
+    inset: calc(-3px * var(--board-control-scale));
+    border: calc(2px * var(--board-control-scale)) solid #a5b4fc;
+    border-radius: calc(7px * var(--board-control-scale));
+    box-shadow: 0 0 0 calc(2px * var(--board-control-scale)) rgb(15 23 42 / 0.82);
+    pointer-events: none;
+  }
+
+  .guild-board-object-unavailable {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    border: calc(1px * var(--board-control-scale)) dashed rgb(148 163 184 / 0.72);
+    border-radius: calc(8px * var(--board-control-scale));
+    background: rgb(15 23 42 / 0.58);
+    color: #cbd5e1;
+  }
+
+  .guild-board-object-unavailable svg {
+    width: 36%;
+    height: 36%;
+  }
+
+  .guild-board-object-actions {
+    position: absolute;
+    top: calc(-38px * var(--board-control-scale));
+    left: 50%;
+    z-index: 4;
+    display: flex;
+    gap: calc(3px * var(--board-control-scale));
+    border: calc(1px * var(--board-control-scale)) solid rgb(255 255 255 / 0.16);
+    border-radius: calc(8px * var(--board-control-scale));
+    background: rgb(9 9 11 / 0.92);
+    padding: calc(3px * var(--board-control-scale));
+    transform: translateX(-50%);
+    box-shadow: 0 calc(5px * var(--board-control-scale)) calc(12px * var(--board-control-scale)) rgb(0 0 0 / 0.28);
+  }
+
+  .guild-board-object-actions button,
+  .guild-board-rotate-handle,
+  .guild-board-resize-handle {
+    display: flex;
+    width: calc(24px * var(--board-control-scale));
+    height: calc(24px * var(--board-control-scale));
+    align-items: center;
+    justify-content: center;
+    border: calc(1px * var(--board-control-scale)) solid rgb(148 163 184 / 0.36);
+    border-radius: calc(6px * var(--board-control-scale));
+    background: #111827;
+    color: #e2e8f0;
+  }
+
+  .guild-board-object-actions button:hover,
+  .guild-board-object-actions button:focus-visible,
+  .guild-board-rotate-handle:hover,
+  .guild-board-rotate-handle:focus-visible,
+  .guild-board-resize-handle:hover,
+  .guild-board-resize-handle:focus-visible {
+    border-color: #a5b4fc;
+    outline: none;
+    color: #c7d2fe;
+  }
+
+  .guild-board-object-actions button:disabled,
+  .guild-board-rotate-handle:disabled,
+  .guild-board-resize-handle:disabled {
+    cursor: wait;
+    opacity: 0.5;
+  }
+
+  .guild-board-object-actions svg,
+  .guild-board-rotate-handle svg,
+  .guild-board-resize-handle svg {
+    width: calc(13px * var(--board-control-scale));
+    height: calc(13px * var(--board-control-scale));
+  }
+
+  .guild-board-rotate-handle,
+  .guild-board-resize-handle {
+    position: absolute;
+    z-index: 4;
+    padding: 0;
+  }
+
+  .guild-board-rotate-handle {
+    bottom: calc(-12px * var(--board-control-scale));
+    left: calc(-12px * var(--board-control-scale));
+    cursor: crosshair;
+  }
+
+  .guild-board-resize-handle {
+    right: calc(-12px * var(--board-control-scale));
+    bottom: calc(-12px * var(--board-control-scale));
+    cursor: nwse-resize;
   }
 
   .guild-board-empty-state {

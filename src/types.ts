@@ -207,15 +207,63 @@ export interface PublicGuild {
 
 export type GuildBoardTheme = 'midnight' | 'mint' | 'cork' | 'paper';
 
+export type GuildBoardAssetKind = 'emoji' | 'sticker';
+
+export interface GuildBoardObjectGeometry {
+  x: number;
+  y: number;
+  size: number;
+  rotation: number;
+  zIndex: string;
+}
+
+export interface PublicGuildBoardObject extends GuildBoardObjectGeometry {
+  id: string;
+  kind: GuildBoardAssetKind;
+  url: string;
+}
+
+export interface AdminGuildBoardObject extends GuildBoardObjectGeometry {
+  id: string;
+  kind: GuildBoardAssetKind;
+  assetId: string;
+  url: string | null;
+  available: boolean;
+}
+
+export interface GuildBoardEmojiAsset {
+  id: string;
+  name: string;
+  animated: boolean;
+  url: string;
+}
+
+export interface GuildBoardStickerAsset {
+  id: string;
+  name: string;
+  formatType: number;
+  url: string;
+}
+
+export interface GuildBoardAssets {
+  emojis: GuildBoardEmojiAsset[];
+  stickers: GuildBoardStickerAsset[];
+}
+
 export interface GuildBoard {
   theme: GuildBoardTheme;
   width: number;
   height: number;
   revision: string;
+  objects: AdminGuildBoardObject[];
 }
 
-export interface PublicGuildBoard extends GuildBoard {
-  objects: Record<string, unknown>[];
+export interface PublicGuildBoard {
+  theme: GuildBoardTheme;
+  width: number;
+  height: number;
+  revision: string;
+  objects: PublicGuildBoardObject[];
 }
 
 export interface KnownDiscordIdentity {

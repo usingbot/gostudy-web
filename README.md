@@ -8,7 +8,7 @@ Prerequisites: Node.js 20 or newer and PostgreSQL.
 
 1. Install dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and replace every placeholder.
-3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20. Migration `0010_create_guild_publishing.sql` requires StudyLion schema v21, and `0011_create_guild_boards.sql` requires StudyLion schema v22. Deploy each migration before its matching application build.
+3. Apply the SQL files in `migrations/` in numeric order. Migration `0003_create_reward_seen_rewards.sql` must run before deploying an application build that reads unseen-reward state. Migration `0004_create_admin_roles.sql` requires the StudyLion v19 Chalk functions and the `gostudy_web` role to exist first. Migrations `0005_create_board_shop.sql` through `0009_create_photo_frames.sql` require StudyLion schema v20. Migration `0010_create_guild_publishing.sql` requires StudyLion schema v21, while `0011_create_guild_boards.sql` and `0012_create_guild_board_objects.sql` require StudyLion schema v22. Deploy each migration before its matching application build.
 4. In the Discord developer portal, register `http://localhost:3000/auth/discord/callback` as an OAuth redirect URI.
 5. Start Express with `npm run dev:server`.
 6. In another terminal, start Vite with `npm run dev`.
@@ -54,7 +54,7 @@ An authenticated user without a row in `public.web_user_roles` is an ordinary `u
 
 The Admin Panel supports exact canonical Discord-user-ID lookup only. A displayed username, global name, or avatar is a best-known projection from that user's latest unexpired website session, not proof of current Discord membership. Session identifiers, session JSON, OAuth state, and secrets are never returned.
 
-Admin mutations require an authenticated owner/admin session, an exact same-origin `Origin`, JSON media type, a strict body no larger than 16 KiB, and canonical input. They are limited to 30 attempts per authenticated actor per 10 minutes in this one-process private-alpha deployment. Horizontal deployment requires a shared rate-limit store.
+Admin mutations require an authenticated owner/admin session, an exact same-origin `Origin`, JSON media type, a strict body no larger than 16 KiB, and canonical input. Sensitive settings and account mutations remain limited to 30 attempts per authenticated actor per 10 minutes. Chapter 7E add, transform, layer, and delete interactions instead use a dedicated fixed-window quota of 120 requests per authenticated actor and target guild per minute; read-only board and asset-picker requests do not consume it. A rejection returns the safe `RATE_LIMITED` code with `Retry-After`. These in-process private-alpha limiters require a shared store before horizontal deployment.
 
 Chalk adjustments call only the four narrow v19 admin/read functions. The server namespaces a client UUIDv4 as `admin:<actor_userid>:<requestId>`, and the UI retains that UUID for retries whose result is unknown. The runtime role has no generic Chalk mutation privilege and no direct Chalk-table or role-table mutation privilege.
 
@@ -309,9 +309,65 @@ Documented production sequence—do not execute it during development validation
 9. Open the guild's public page anonymously and verify the same theme, dimensions, pan/zoom controls, and honest empty state.
 10. Do not add decorations until Chapter 7E.
 
-Discord emoji and sticker board objects, their picker, placement, dragging, movement permissions, ownership, and Chalk costs are deferred to Chapter 7E. Chapter 7D has no decoration controls and returns an empty object array by design. Living Board vitality/decay is deferred until after Chapter 7E.
+Chapter 7D's original empty object array is populated by Chapter 7E's Discord emoji and sticker placements. Living Board vitality/decay remains deferred.
 
 Disposable Chapter 7D coverage lives in `tests/integration/chapter7d_acl_snapshot.sql` and `tests/integration/chapter7d_guild_boards.sql`. In one isolated PostgreSQL database, load current StudyLion `data/schema.sql` v22, create non-superuser `gostudy_web` and NOLOGIN owner roles, run the established v20 ownership setup, and apply web migrations 0001–0010. Then, in one psql session, run the ACL snapshot, migration 0011, and Chapter 7D assertions in that order. The test proves constraints, all four themes and capacity tiers, active-guild enforcement, dimension-preserving theme saves, owner-only non-shrinking expansion, optimistic revisions and atomic conflicts, real non-owner runtime privileges, PUBLIC revocation, no bot-registry foreign key, and unchanged guild-registry ACLs. Drop the disposable cluster afterward; never point this sequence at `lion_data`.
+
+## Discord board decorations and migration 0012
+
+`public.web_guild_board_objects` stores one Discord decoration placement as identity plus logical geometry: guild ID, `emoji` or `sticker`, the Discord asset ID, top-left `x`/`y`, square size, rotation, canonical layer, audit actors, and timestamps. It never stores image bytes, Discord CDN URLs, names, descriptions, selection state, viewer pan, or viewer zoom. Multiple placements of the same asset are valid, and Chapter 7E deliberately has no object-count limit or quota.
+
+Chapter 7E is same-guild-only. `public.web_add_guild_board_asset` independently proves that an emoji or sticker belongs to the target board guild and is currently `available = TRUE`; the browser picker is not an authority. The function also rejects unsupported sticker formats. `web_update_guild_board_object` can change only position, size, and rotation. `web_delete_guild_board_object` is board-scoped, and `web_reorder_guild_board_object` accepts only `front` or `back`, then calculates compact canonical layers server-side. All four functions are `SECURITY DEFINER`, lock by guild, validate the active registry guild, check the Chapter 7D expected revision, increment `web_guild_boards.revision` exactly once, and return canonical state. A first valid placement at expected revision `0` atomically creates the `midnight` `3000 × 1800` board at revision `1`.
+
+Every board setting, capacity, and object mutation shares the same optimistic revision. A stale request returns `GUILD_BOARD_REVISION_CONFLICT`; the editor refetches the canonical board and reports that its change was not applied. Move, resize, and rotate gestures update only local React geometry during pointer movement and make at most one network/database write after a completed pointer-up; canceled or lost-pointer gestures are discarded. Object requests are serialized against the latest canonical revision, and consecutive pending transforms for one object coalesce to the latest intended geometry. On `429`, the editor does not retry automatically: it refetches canonical state, clears transient intent, reports rate limiting, and disables further edits for the advertised `Retry-After` cooldown. Geometry uses the stable Chapter 7D top-left logical origin, sizes from 48 through 720 units, rotations from −180° through +180°, and axis-aligned containment (`x + size <= width`, `y + size <= height`). Expansion adds right/bottom space without moving existing coordinates.
+
+The server constructs media URLs only from trusted synced metadata. Static custom emojis use `https://cdn.discordapp.com/emojis/<id>.png`; animated custom emojis use the `.gif` endpoint and remain animated. Sticker format 1 (PNG) and format 2 (APNG) use `https://cdn.discordapp.com/stickers/<id>.png`; format 4 (GIF) uses Discord's distinct `https://media.discordapp.net/stickers/<id>.gif` host. Format 3 Lottie stickers are excluded from the v1 picker because the application has no Lottie rendering dependency. Go Study never downloads these assets to R2, stores their URLs, proxies their bytes, fabricates conversions, or accepts a browser-supplied URL. Helmet `img-src` permits exactly `https://cdn.discordapp.com` and `https://media.discordapp.net` for Discord media; neither a Discord wildcard nor a `connect-src` permission for the image host is used.
+
+`GET /api/servers/:slug/board` remains anonymous and returns only renderable placement ID, kind, trusted URL, geometry, and string layer. It omits asset owner guild, raw asset ID, actors, and timestamps. Unavailable or unsupported assets are silently omitted, so the public board never displays a broken image or edit control; placement rows remain intact. `GET /api/admin/servers/:guildid/board` includes raw asset identity, `available`, nullable trusted URL, geometry, and layer so unavailable placements remain deletable. The authenticated `GET /api/admin/servers/:guildid/board/assets` lists only the target guild's available, placeable emoji and stickers; there is no public full-library endpoint.
+
+The guild-branded picker has Emoji and Stickers tabs, name search, accessible picker-only names, and a visual grid. Clicking an asset clamps a consistent 180-unit placement around the current viewport center. The editor provides transient selection, resize, rotation, front/back, and delete controls; deselected and public decorations render as bare transparent artwork. The board and its objects are laid out at their final display size, object edges are snapped to integer CSS pixels, and unrotated artwork avoids a transform/filter layer. Empty-space drag, Space-drag, middle-mouse panning, wheel pan, pointer-centered zoom, Fit, and 100% remain available. Delete/Backspace removes a selected placement, and Escape or an empty-board click deselects it.
+
+The runtime `gostudy_web` role receives `SELECT` on `web_guild_board_objects`, `gostudy_guild_emojis`, and `gostudy_guild_stickers`, but no direct mutation privilege on any of them. Placement writes are available only through the four narrow functions, and PUBLIC execution is revoked. The definer owner needs registry `SELECT` to perform authoritative ownership checks. The migration does not change StudyLion's `lion` registry privileges.
+
+### Deploying migration 0012
+
+Documented production sequence—do not execute it during development validation:
+
+1. Back up `lion_data` using the established StudyLion procedure.
+2. Verify the deployed StudyLion schema is v22.
+3. Verify migration `0011_create_guild_boards.sql` exists in production.
+4. Apply `migrations/0012_create_guild_board_objects.sql` with a controlled deployment role.
+5. Transfer the new table, identity sequence, and all four functions to the existing `gostudy_web_owner` NOLOGIN role:
+
+   ```sql
+   ALTER TABLE public.web_guild_board_objects OWNER TO gostudy_web_owner;
+   ALTER SEQUENCE public.web_guild_board_objects_objectid_seq
+     OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_add_guild_board_asset(
+     bigint, text, bigint, integer, integer, integer, numeric, bigint, bigint
+   ) OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_update_guild_board_object(
+     bigint, bigint, integer, integer, integer, numeric, bigint, bigint
+   ) OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_delete_guild_board_object(
+     bigint, bigint, bigint, bigint
+   ) OWNER TO gostudy_web_owner;
+   ALTER FUNCTION public.web_reorder_guild_board_object(
+     bigint, bigint, text, bigint, bigint
+   ) OWNER TO gostudy_web_owner;
+   ```
+
+6. Verify table, registry-read, function-execution, PUBLIC-revocation, owner-read, and unchanged `lion` registry ACLs; confirm `gostudy_web` is not a member of `gostudy_web_owner`.
+7. Build and deploy the matching application.
+8. Open one active guild's authenticated asset picker and confirm only that guild's available assets appear.
+9. Place one emoji and verify revision `0` first placement if the board has no row.
+10. Move, resize, rotate, bring forward/send backward, and reload the editor.
+11. Open the anonymous public board and verify bare artwork with no editing controls.
+12. Mark the test asset unavailable through the normal StudyLion synchronization path and verify the public board hides it while the admin can still delete its placement.
+
+Disposable Chapter 7E coverage lives in `tests/integration/chapter7e_acl_snapshot.sql` and `tests/integration/chapter7e_guild_board_objects.sql`. In one isolated PostgreSQL database, load current StudyLion `data/schema.sql` v22, create a real non-superuser `gostudy_web` role and NOLOGIN `gostudy_web_owner`, apply web migrations 0001–0011 with the established ownership setup, then run the Chapter 7E ACL snapshot, migration 0012, and Chapter 7E assertions in that order. The rollback-only suite proves constraints, least privilege, same-guild acceptance, cross-guild/unavailable/Lottie rejection, first-placement creation, geometry, shared revisions, stale different-object conflicts, canonical layers, direct-mutation denial, and unavailable-placement retention. Drop the temporary database and roles afterward. Never point it at `lion_data`.
+
+Cross-server asset permissions, allowlists, global/open modes, and asset-import economics are explicitly deferred. Living Board vitality, decay, opacity aging, dormancy, revival, and preservation are also deferred; Chapter 7E contains none of those behaviors.
 
 ## Production
 

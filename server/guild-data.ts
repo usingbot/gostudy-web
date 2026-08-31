@@ -125,6 +125,32 @@ export function discordGuildAssetUrl(
   return `https://cdn.discordapp.com/${kind}/${guildId}/${hash}.${extension}?size=${size}`;
 }
 
+export const DISCORD_RENDERABLE_STICKER_FORMATS = [1, 2, 4] as const;
+
+export function discordEmojiAssetUrl(emojiId: string, animated: boolean): string {
+  if (!/^[1-9]\d*$/.test(emojiId)) {
+    throw new Error('Database emoji ID was invalid');
+  }
+  const extension = animated ? 'gif' : 'png';
+  return `https://cdn.discordapp.com/emojis/${emojiId}.${extension}?size=1024&quality=lossless`;
+}
+
+export function discordStickerAssetUrl(
+  stickerId: string,
+  formatType: number,
+): string | null {
+  if (!/^[1-9]\d*$/.test(stickerId)) {
+    throw new Error('Database sticker ID was invalid');
+  }
+  if (formatType === 1 || formatType === 2) {
+    return `https://cdn.discordapp.com/stickers/${stickerId}.png?size=320`;
+  }
+  if (formatType === 4) {
+    return `https://media.discordapp.net/stickers/${stickerId}.gif?size=320`;
+  }
+  return null;
+}
+
 function mapGuild(row: GuildRow): GuildSummary {
   const guildid = readString(row.guildid, 'guildid');
   const iconHash = readNullableString(row.icon_hash, 'icon_hash');

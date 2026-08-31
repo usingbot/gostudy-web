@@ -2,6 +2,42 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 
+import {
+  calculateGuildBoardFit,
+  GUILD_BOARD_DESKTOP_FIT_MARGIN,
+  GUILD_BOARD_MAX_ZOOM,
+  GUILD_BOARD_MIN_ZOOM,
+  GUILD_BOARD_MOBILE_FIT_MARGIN,
+} from '../src/guild-board-viewport.js';
+
+test('board Fit uses the inner viewport, preserves aspect ratio, and centers with a bounded margin', () => {
+  const fit = calculateGuildBoardFit({
+    viewportWidth: 1120,
+    viewportHeight: 680,
+    boardWidth: 300,
+    boardHeight: 180,
+  });
+  assert.equal(fit.margin, GUILD_BOARD_DESKTOP_FIT_MARGIN);
+  assert.ok(fit.margin >= 20 && fit.margin <= 40);
+  assert.equal(fit.renderedWidth / fit.renderedHeight, 300 / 180);
+  assert.equal(fit.x, (1120 - fit.renderedWidth) / 2);
+  assert.equal(fit.y, (680 - fit.renderedHeight) / 2);
+  assert.ok(fit.renderedWidth <= 1120 - fit.margin * 2);
+  assert.ok(fit.renderedHeight <= 680 - fit.margin * 2);
+});
+
+test('board Fit uses a smaller mobile margin and manual zoom remains bounded from 30 to 200 percent', () => {
+  const fit = calculateGuildBoardFit({
+    viewportWidth: 390,
+    viewportHeight: 288,
+    boardWidth: 300,
+    boardHeight: 180,
+  });
+  assert.equal(fit.margin, GUILD_BOARD_MOBILE_FIT_MARGIN);
+  assert.equal(GUILD_BOARD_MIN_ZOOM, 0.3);
+  assert.equal(GUILD_BOARD_MAX_ZOOM, 2);
+});
+
 test('board editor is protected by guild publishing authorization and linked from each guild', async () => {
   const [app, publishing, editor] = await Promise.all([
     readFile('src/App.tsx', 'utf8'),
@@ -44,6 +80,7 @@ test('public detail fetches the public board and renders the shared honest empty
   assert.match(detail, /fetchPublicGuildBoard/);
   assert.match(detail, /<GuildBoardCanvas[\s\S]+theme={board\.theme}[\s\S]+width={board\.width}[\s\S]+height={board\.height}[\s\S]+objects={board\.objects}/);
   assert.match(canvas, /Nothing has been pinned here yet\./);
+  assert.doesNotMatch(`${detail}\n${canvas}`, /Be the first to pin|pin something/i);
   assert.match(canvas, /data-object-count={objects\.length}/);
   assert.match(api, /credentials: 'omit'/);
   assert.doesNotMatch(`${detail}\n${canvas}`, /fake|sample post|online members|study hours|active students|streak/i);
@@ -59,7 +96,12 @@ test('board renderer uses fixed CSS classes and no network-backed theme assets',
     assert.match(css, new RegExp(`\\.guild-board-theme-${key}`));
   }
   assert.doesNotMatch(css, /url\s*\(/i);
+  assert.match(canvasSurfaceSource(css), /background-color: var\(--board-background\)/);
 });
+
+function canvasSurfaceSource(css: string): string {
+  return css.slice(css.indexOf('.guild-board-surface {'), css.indexOf('.guild-board-surface::before'));
+}
 
 test('owner-only capacity controls expose fixed expansions with deliberate confirmation and no shrinking inputs', async () => {
   const [editor, capacities] = await Promise.all([
@@ -83,9 +125,12 @@ test('shared finite viewport provides bounded browser-only pan and zoom controls
     readFile('src/components/GuildBoardCanvas.tsx', 'utf8'),
     readFile('src/index.css', 'utf8'),
   ]);
-  assert.match(canvas, /const MIN_ZOOM = 0\.3/);
-  assert.match(canvas, /const MAX_ZOOM = 2/);
+  assert.match(canvas, /GUILD_BOARD_MIN_ZOOM/);
+  assert.match(canvas, /GUILD_BOARD_MAX_ZOOM/);
   assert.match(canvas, /const MAX_OVERSCROLL = 150/);
+  assert.match(canvas, /viewport\.clientWidth/);
+  assert.match(canvas, /viewport\.clientHeight/);
+  assert.match(canvas, /fitScale \* zoomFactor/);
   assert.match(canvas, /Fit board/);
   assert.match(canvas, /Set board zoom to 100 percent/);
   assert.match(canvas, /onPointerDown/);
@@ -93,5 +138,7 @@ test('shared finite viewport provides bounded browser-only pan and zoom controls
   assert.match(canvas, /event\.ctrlKey \|\| event\.metaKey/);
   assert.match(canvas, /addEventListener\('wheel', handleWheel, \{passive: false\}\)/);
   assert.match(css, /touch-action: none/);
+  assert.doesNotMatch(css, /\.guild-board-viewport[\s\S]{0,300}padding:\s*(?:[5-9]\d|\d{3,})px/);
+  assert.doesNotMatch(canvas, /window\.(?:innerWidth|innerHeight)/);
   assert.doesNotMatch(canvas, /fetch\(|localStorage|sessionStorage|canvas|getContext/);
 });

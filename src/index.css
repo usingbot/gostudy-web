@@ -10,8 +10,8 @@
   .guild-board-shell {
     overflow: hidden;
     border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: 1.75rem;
-    background: #09090b;
+    border-radius: 1.25rem;
+    background: #0b101c;
     box-shadow: 0 24px 60px rgb(0 0 0 / 0.22);
   }
 
@@ -23,7 +23,7 @@
     justify-content: flex-end;
     gap: 0.5rem;
     border-bottom: 1px solid rgb(255 255 255 / 0.1);
-    background: #18181b;
+    background: #111827;
     padding: 0.625rem 0.75rem;
   }
 
@@ -35,11 +35,24 @@
   }
 
   .guild-board-zoom {
-    min-width: 3.25rem;
+    display: inline-flex;
+    min-width: 4.5rem;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.3rem;
     text-align: center;
     color: #cbd5e1;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.75rem;
+  }
+
+  .guild-board-zoom small {
+    color: #818cf8;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .guild-board-toolbar button {
@@ -70,11 +83,15 @@
 
   .guild-board-viewport {
     position: relative;
-    height: clamp(24rem, 55vw, 42rem);
-    min-height: 24rem;
+    height: clamp(18rem, 55vw, 46rem);
+    min-height: 18rem;
     overflow: hidden;
-    background-color: #050507;
-    background-image: radial-gradient(circle at center, rgb(99 102 241 / 0.1), transparent 62%);
+    background-color: #070b14;
+    background-image:
+      radial-gradient(circle at 50% 45%, rgb(79 70 229 / 0.13), transparent 62%),
+      linear-gradient(rgb(148 163 184 / 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(148 163 184 / 0.025) 1px, transparent 1px);
+    background-size: auto, 28px 28px, 28px 28px;
     cursor: grab;
     touch-action: none;
     user-select: none;
@@ -119,7 +136,6 @@
     display: flex;
     overflow: hidden;
     border: 1px solid var(--board-border);
-    border-radius: 1.75rem;
     background-color: var(--board-background);
     color: var(--board-foreground);
     box-shadow: inset 0 1px 0 var(--board-highlight), 0 24px 60px rgb(0 0 0 / 0.22);
@@ -197,38 +213,39 @@
   }
 
   .guild-board-empty-state {
-    margin: auto;
-    max-width: 25rem;
-    padding: 2rem;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(22rem, calc(100% - 2rem));
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-radius: 0.9rem;
+    background: color-mix(in srgb, var(--board-background) 88%, transparent);
+    padding: 1rem 1.25rem;
     text-align: center;
+    transform-origin: center;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.12);
   }
 
   .guild-board-empty-icon {
     display: inline-flex;
-    height: 3rem;
-    width: 3rem;
+    height: 2rem;
+    width: 2rem;
     align-items: center;
     justify-content: center;
     border: 1px solid currentColor;
-    border-radius: 1rem;
-    opacity: 0.58;
+    border-radius: 0.65rem;
+    opacity: 0.5;
   }
 
   .guild-board-empty-icon svg {
-    height: 1.25rem;
-    width: 1.25rem;
+    height: 0.9rem;
+    width: 0.9rem;
   }
 
   .guild-board-empty-title {
-    margin-top: 1rem;
-    font-weight: 800;
-  }
-
-  .guild-board-empty-copy {
-    margin-top: 0.5rem;
+    margin-top: 0.65rem;
     font-size: 0.875rem;
-    line-height: 1.5rem;
-    opacity: 0.68;
+    font-weight: 800;
   }
 
   @media (max-width: 640px) {

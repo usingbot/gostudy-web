@@ -168,7 +168,7 @@ export default function GuildBoardEditor() {
         </div>
       </header>
 
-      <div className="grid gap-7 2xl:grid-cols-[minmax(300px,0.68fr)_minmax(560px,1.32fr)]">
+      <div className="grid gap-7 xl:grid-cols-[minmax(280px,0.62fr)_minmax(0,1.38fr)]">
         <div className="space-y-7">
         <section className="rounded-[28px] border border-slate-800 bg-[#18181b] p-6" aria-labelledby="board-theme-heading">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Appearance</p>
@@ -289,7 +289,7 @@ export default function GuildBoardEditor() {
         </section>
         </div>
 
-        <section className="min-w-0 rounded-[28px] border border-slate-800 bg-[#18181b] p-5 sm:p-7" aria-labelledby="board-preview-heading">
+        <section className="min-w-0 rounded-[28px] border border-slate-800 bg-[#18181b] p-4 sm:p-5" aria-labelledby="board-preview-heading">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Live preview</p>
@@ -302,7 +302,7 @@ export default function GuildBoardEditor() {
             width={board.width}
             height={board.height}
             objects={[]}
-            className="mt-5"
+            className="mt-4"
           />
         </section>
       </div>

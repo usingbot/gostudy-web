@@ -9,13 +9,15 @@ import {
 } from 'react';
 
 import {getGuildBoardTheme} from '../guild-board-themes';
+import {
+  calculateGuildBoardFit,
+  GUILD_BOARD_MAX_ZOOM,
+  GUILD_BOARD_MIN_ZOOM,
+} from '../guild-board-viewport';
 import type {GuildBoardTheme} from '../types';
 
-const MIN_ZOOM = 0.3;
-const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.15;
 const LOGICAL_UNIT_SCALE = 0.1;
-const FIT_PADDING = 24;
 const MAX_OVERSCROLL = 150;
 
 interface Point {
@@ -24,7 +26,7 @@ interface Point {
 }
 
 function clampZoom(value: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+  return Math.min(GUILD_BOARD_MAX_ZOOM, Math.max(GUILD_BOARD_MIN_ZOOM, value));
 }
 
 export default function GuildBoardCanvas({
@@ -47,7 +49,9 @@ export default function GuildBoardCanvas({
     startClient: Point;
     startPan: Point;
   } | null>(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoomFactor, setZoomFactor] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
+  const [fitMode, setFitMode] = useState(true);
   const [pan, setPan] = useState<Point>({x: 0, y: 0});
   const [dragging, setDragging] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
@@ -55,15 +59,17 @@ export default function GuildBoardCanvas({
   const boardWidth = width * LOGICAL_UNIT_SCALE;
   const boardHeight = height * LOGICAL_UNIT_SCALE;
 
-  const constrainPan = useCallback((candidate: Point, nextZoom: number): Point => {
+  const constrainPan = useCallback((candidate: Point, nextZoomFactor: number): Point => {
     const viewport = viewportRef.current;
     if (!viewport) return candidate;
-    const {width: viewportWidth, height: viewportHeight} = viewport.getBoundingClientRect();
-    const scaledWidth = boardWidth * nextZoom;
-    const scaledHeight = boardHeight * nextZoom;
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+    const actualScale = fitScale * nextZoomFactor;
+    const scaledWidth = boardWidth * actualScale;
+    const scaledHeight = boardHeight * actualScale;
     const overscroll = Math.min(
       MAX_OVERSCROLL,
-      Math.max(100, Math.min(viewportWidth, viewportHeight) * 0.3),
+      Math.max(32, Math.min(viewportWidth, viewportHeight) * 0.08),
     );
 
     const constrainAxis = (value: number, viewportSize: number, surfaceSize: number) => {
@@ -79,21 +85,21 @@ export default function GuildBoardCanvas({
       x: constrainAxis(candidate.x, viewportWidth, scaledWidth),
       y: constrainAxis(candidate.y, viewportHeight, scaledHeight),
     };
-  }, [boardHeight, boardWidth]);
+  }, [boardHeight, boardWidth, fitScale]);
 
   const fitBoard = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    const nextZoom = clampZoom(Math.min(
-      (rect.width - FIT_PADDING * 2) / boardWidth,
-      (rect.height - FIT_PADDING * 2) / boardHeight,
-    ));
-    setZoom(nextZoom);
-    setPan({
-      x: (rect.width - boardWidth * nextZoom) / 2,
-      y: (rect.height - boardHeight * nextZoom) / 2,
+    const geometry = calculateGuildBoardFit({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      boardWidth,
+      boardHeight,
     });
+    setFitScale(geometry.scale);
+    setZoomFactor(1);
+    setFitMode(true);
+    setPan({x: geometry.x, y: geometry.y});
   }, [boardHeight, boardWidth]);
 
   useEffect(() => {
@@ -108,15 +114,16 @@ export default function GuildBoardCanvas({
   const zoomTo = useCallback((value: number, anchor?: Point) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const nextZoom = clampZoom(value);
+    const nextZoomFactor = clampZoom(value);
     const rect = viewport.getBoundingClientRect();
     const focus = anchor ?? {x: rect.width / 2, y: rect.height / 2};
     setPan((current) => constrainPan({
-      x: focus.x - ((focus.x - current.x) / zoom) * nextZoom,
-      y: focus.y - ((focus.y - current.y) / zoom) * nextZoom,
-    }, nextZoom));
-    setZoom(nextZoom);
-  }, [constrainPan, zoom]);
+      x: focus.x - ((focus.x - current.x) / zoomFactor) * nextZoomFactor,
+      y: focus.y - ((focus.y - current.y) / zoomFactor) * nextZoomFactor,
+    }, nextZoomFactor));
+    setZoomFactor(nextZoomFactor);
+    setFitMode(false);
+  }, [constrainPan, zoomFactor]);
 
   const handleWheel = useCallback((event: WheelEvent) => {
     const viewport = viewportRef.current;
@@ -124,17 +131,18 @@ export default function GuildBoardCanvas({
     event.preventDefault();
     const rect = viewport.getBoundingClientRect();
     if (event.ctrlKey || event.metaKey) {
-      zoomTo(zoom * Math.exp(-event.deltaY * 0.002), {
+      zoomTo(zoomFactor * Math.exp(-event.deltaY * 0.002), {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       });
       return;
     }
+    setFitMode(false);
     setPan((current) => constrainPan({
       x: current.x - event.deltaX,
       y: current.y - event.deltaY,
-    }, zoom));
-  }, [constrainPan, zoom, zoomTo]);
+    }, zoomFactor));
+  }, [constrainPan, zoomFactor, zoomTo]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -148,6 +156,7 @@ export default function GuildBoardCanvas({
     event.preventDefault();
     event.currentTarget.focus({preventScroll: true});
     event.currentTarget.setPointerCapture(event.pointerId);
+    setFitMode(false);
     dragRef.current = {
       pointerId: event.pointerId,
       startClient: {x: event.clientX, y: event.clientY},
@@ -162,7 +171,7 @@ export default function GuildBoardCanvas({
     setPan(constrainPan({
       x: drag.startPan.x + event.clientX - drag.startClient.x,
       y: drag.startPan.y + event.clientY - drag.startClient.y,
-    }, zoom));
+    }, zoomFactor));
   };
 
   const finishPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -171,10 +180,15 @@ export default function GuildBoardCanvas({
     setDragging(false);
   };
 
+  const actualScale = fitScale * zoomFactor;
   const surfaceStyle: CSSProperties = {
     width: boardWidth,
     height: boardHeight,
-    transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+    borderRadius: `${12 / actualScale}px`,
+    transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${actualScale})`,
+  };
+  const emptyStateStyle: CSSProperties = {
+    transform: `translate(-50%, -50%) scale(${1 / actualScale})`,
   };
 
   return (
@@ -184,12 +198,15 @@ export default function GuildBoardCanvas({
       data-object-count={objects.length}
       data-logical-width={width}
       data-logical-height={height}
+      data-fit-scale={fitScale}
+      data-fit-mode={fitMode}
+      data-zoom-factor={zoomFactor}
     >
       <div className="guild-board-toolbar" aria-label="Board viewport controls">
         <span className="guild-board-dimensions">{width.toLocaleString()} × {height.toLocaleString()} units</span>
-        <span className="guild-board-zoom" aria-live="polite">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => zoomTo(zoom - ZOOM_STEP)} aria-label="Zoom out"><Minus /></button>
-        <button type="button" onClick={() => zoomTo(zoom + ZOOM_STEP)} aria-label="Zoom in"><Plus /></button>
+        <span className="guild-board-zoom" aria-live="polite">{Math.round(zoomFactor * 100)}%{fitMode && <small>Fit</small>}</span>
+        <button type="button" onClick={() => zoomTo(zoomFactor - ZOOM_STEP)} aria-label="Zoom out"><Minus /></button>
+        <button type="button" onClick={() => zoomTo(zoomFactor + ZOOM_STEP)} aria-label="Zoom in"><Plus /></button>
         <button type="button" onClick={fitBoard} aria-label="Fit board"><Maximize2 /><span>Fit</span></button>
         <button type="button" onClick={() => zoomTo(1)} aria-label="Set board zoom to 100 percent"><Scan /><span>100%</span></button>
       </div>
@@ -219,10 +236,9 @@ export default function GuildBoardCanvas({
           className={`guild-board-surface ${definition.className}`}
           style={surfaceStyle}
         >
-          <div className="guild-board-empty-state">
+          <div className="guild-board-empty-state" style={emptyStateStyle}>
             <span className="guild-board-empty-icon" aria-hidden="true"><Pin /></span>
             <p className="guild-board-empty-title">Nothing has been pinned here yet.</p>
-            <p className="guild-board-empty-copy">This shared board is ready for the community’s first study moment.</p>
           </div>
         </div>
       </div>
